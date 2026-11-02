@@ -42,7 +42,7 @@ export function createHost(opts){
       error: msg => {
         // the code we had before a reload can stay held at the broker for a
         // minute; keep asking for it, then give up and take a new one
-        if(msg === 'taken' && code && takenTries++ < 12){ room.status = 'Getting the room back...'; info(); setTimeout(open, 5000); return; }
+        if(msg === 'taken' && code && takenTries++ < 36){ room.status = 'Getting the room back...'; info(); setTimeout(open, 5000); return; }
         if(msg === 'taken'){ code = null; setTimeout(open, 100); return; }
         room.status = msg + ' Retrying...'; room.code = null; info();
         setTimeout(() => { if(!room.code && !dead) open(); }, 4000);
@@ -57,22 +57,31 @@ export function createHost(opts){
     c.on('data', d => {
       if(!d || typeof d !== 'object') return;
       const now = src.now();
-      if(d.t === 'hello'){
-        id = String(d.dev || c.peer).slice(0, 40);
+      if(d.t === 'hello' || d.t === 'fresh'){
+        const dev = String(d.dev || c.peer).slice(0, 40);
+        // which player this is: their device id, or - a phone that lost
+        // its saved id - the player of the same name who is not here now
+        let who = {id: dev, back: false};
+        if(d.t === 'fresh'){ if(id && id !== dev && people[id] && people[id].conn === c) people[id].conn = null; G.fresh(S, dev, d.name, d.kid); }
+        // somebody heard from in the last 4 s is here, and keeps their name
+        else who = G.resolve(S, dev, d.name, pid => !!(people[pid] && people[pid].conn && people[pid].conn !== c && performance.now() - people[pid].seen < 4000));
+        id = who.id;
         const old = people[id];
         if(old && old.conn && old.conn !== c){ try { old.conn.close(); } catch(e){} }
         const p = old || {id};
         p.conn = c; p.seen = performance.now(); p.last = '';
         people[id] = p;
-        const pl = G.join(S, id, d.name, d.kid);
+        // the phone's own player can change its name; one picked up by name keeps it
+        const pl = G.join(S, id, id === dev && d.t === 'hello' ? d.name : S.players[id].name, d.kid);
         pl.on = true;
-        send(p, {t: 'host', proto: G.PROTO, code: room.code});
+        send(p, {t: 'host', proto: G.PROTO, code: room.code, back: who.back ? {n: pl.name, s: pl.score} : null, name: pl.name});
         push(p, now, true);
         info();
         return;
       }
       const p = id && people[id];
       if(!p || p.conn !== c) return;
+      if(d.t === 'bye'){ p.conn = null; if(S.players[id]) S.players[id].on = false; info(); return; }   // the page closed
       p.seen = performance.now();
       const pl = S.players[id];
       if(pl && !pl.on){ pl.on = true; info(); }
@@ -166,6 +175,8 @@ export function createHost(opts){
     get S(){ return S; }, get N(){ return N; }, room, source: src, roomInfo,
     now: () => src.now(),
     /* the jumbotron's own keys */
+    setMode(m){ G.setMode(S, m, src.now()); persist(); },
+    flag(){ G.flag(S, '_tv', src.now()); },
     nudgeD(ms){ S.D += ms; S.dTaps = S.dTaps.map(x => x + ms); },
     trivia(){ G.ad(S, '_', src.now()); },
     reset(){ S = G.create(cfg); persist(); info(); },

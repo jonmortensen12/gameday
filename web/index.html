@@ -80,6 +80,13 @@ body.quiet #board { opacity: 0.62; }
 #lb li.off { opacity: 0.45; }
 #foot { grid-column: 1 / 4; display: flex; gap: 18px; align-items: center; color: var(--dim); font-size: 15px; }
 #foot .sp { flex: 1; }
+#foot button { font-size: 14px; padding: 6px 12px; font-weight: 700; background: #071634; }
+body.drives #next, body.drives #lastBox, body.drives #roc { display: none; }
+body.drives #drive { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+body.drives #drive .lbl { font-size: 20px; }
+body.drives #drive .opts div { padding: 30px 10px; font-size: 26px; }
+body.drives #drive .opts b { font-size: 64px; }
+#driveLast { margin-top: 16px; font-size: 22px; color: #d7e5ff; min-height: 1.3em; }
 #ticker { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- the moments ---- */
@@ -146,6 +153,10 @@ body.quiet #board { opacity: 0.62; }
     <div class="note">A rehearsal plays the real feed back from kickoff, as if live. Find the game's replay video, start it, and tap KICK on a phone at the opening kickoff - the game lines itself up with the video. <b>P</b> pauses along with the video.</div>
     <div class="row" id="speeds" style="margin-top:8px"><button data-s="1" class="sel">Real time</button><button data-s="4">4× (a quick look)</button><button data-s="20">20×</button></div>
 
+    <h2>What the room calls</h2>
+    <div class="row" id="modes"><button data-m="plays" class="sel">Every play + every drive</button><button data-m="drives">Drives only</button></div>
+    <div class="note">Drives only: one question per possession - how does it end? - for a room that would rather watch than tap. Switch any time during the game with <b>M</b> or the button at the bottom of the board.</div>
+
     <h2>The room</h2>
     <label><input type="checkbox" id="useCam" checked> Use this laptop's camera and microphone (Cougar Cam, reaction replays)</label>
     <div class="note">Put the laptop beside the TV, facing the couch. Nothing it records leaves this laptop.</div>
@@ -188,13 +199,14 @@ body.quiet #board { opacity: 0.62; }
     <div id="drive" class="panel">
       <div class="lbl" id="driveL">Next drive</div>
       <div class="opts" id="driveO"></div>
+      <div id="driveLast"></div>
     </div>
   </div>
   <div id="lb" class="panel">
     <div class="lbl">Leaderboard</div>
     <ol id="lbList"></ol>
   </div>
-  <div id="foot"><span id="ticker"></span><span class="sp"></span><span id="people"></span></div>
+  <div id="foot"><span id="ticker"></span><span class="sp"></span><button id="modeChip" title="M">Mode: every play</button><button id="flagChip" title="X">🚩 Review</button><span id="people"></span></div>
 </div>
 
 <div class="over" id="tvOver">
@@ -237,6 +249,8 @@ body.quiet #board { opacity: 0.62; }
   <kbd>F</kbd> full screen · <kbd>H</kbd> this help<br>
   <kbd>C</kbd> Cougar Cam now · <kbd>R</kbd> pretend the room just went off<br>
   <kbd>T</kbd> trivia round now · <kbd>V</kbd> play the reaction reel<br>
+  <kbd>M</kbd> every play / drives only<br>
+  <kbd>X</kbd> start a review · <kbd>1</kbd> it stands · <kbd>2</kbd> overturned<br>
   <kbd>[</kbd> <kbd>]</kbd> TV delay -1 s / +1 s<br>
   <kbd>P</kbd> pause a rehearsal · <kbd>→</kbd> skip it 30 s<br>
   <kbd>S</kbd> save every reaction clip to this laptop
@@ -258,7 +272,14 @@ const isLocal = GDNet.isLocal();
 
 /* ---------- setup: which game ---------- */
 const MAIN = {league: 'cfb', event: '401856849', team: '252', label: 'BYU at Utah', replay: false};
-let choice = null, speed = +(Q.get('speed') || 1);
+let choice = null, speed = +(Q.get('speed') || 1), mode = Q.get('mode') === 'drives' ? 'drives' : 'plays';
+let modePicked = !!Q.get('mode');
+function toggleMode(){ if(host) host.setMode(host.S.mode === 'drives' ? 'plays' : 'drives'); }
+document.querySelectorAll('#modes button').forEach(b => b.addEventListener('click', () => { modePicked = true; }));
+document.querySelectorAll('#modes button').forEach(b => {
+  b.classList.toggle('sel', b.dataset.m === mode);
+  b.onclick = () => { mode = b.dataset.m; document.querySelectorAll('#modes button').forEach(x => x.classList.toggle('sel', x === b)); };
+});
 
 function choose(c){
   choice = c;
@@ -330,12 +351,16 @@ let host = null, cam = null, view = null, room = null;
 function start(c){
   $('setup').classList.add('hide');
   const src = c.replay ? replaySource(c.league, c.event, {speed, preroll: +(Q.get('preroll') || 120)}) : liveSource(c.league, c.event);
-  host = createHost({cfg: {league: c.league, event: c.event, team: c.team, seed: (Math.random() * 2 ** 31) | 0},
+  host = createHost({cfg: {league: c.league, event: c.event, team: c.team, mode, seed: (Math.random() * 2 ** 31) | 0},
     source: src, fresh: Q.get('fresh') === '1',
     onView: (v, S, now) => { view = v; render(v, S, now); },
     onRoom: r => { room = r; renderRoom(r); },
   });
   window.GD = {host, cam: null, choice: c};
+  // a game carried on from before keeps its mode unless one was picked now
+  if(host.S.mode !== mode && modePicked) host.setMode(mode);
+  $('modeChip').onclick = toggleMode;
+  $('flagChip').onclick = () => host.flag();
   if($('useCam').checked && Q.get('nocam') !== '1') startCam();
   document.title = 'Game Day · ' + c.label;
 }
@@ -381,6 +406,10 @@ function render(v, S, now){
     $('themN').textContent = v.score.them.abbr || ''; $('themS').textContent = v.score.them.s; $('themSw').style.background = v.score.them.c;
     $('detail').textContent = v.score.state === 'pre' ? 'Kickoff soon' : v.score.state === 'post' ? 'Final' : (v.score.detail ? v.score.detail + ' · from the feed' : '');
   }
+  document.body.classList.toggle('drives', v.mode === 'drives');
+  $('modeChip').textContent = v.mode === 'drives' ? 'Mode: drives only' : 'Mode: every play';
+  const lastDrive = v.log.filter(l => l.k === 'drive').pop();
+  $('driveLast').textContent = lastDrive ? 'Last: ' + lastDrive.line : '';
   // the room
   $('rocN').textContent = v.rocN ? v.roc + '%' : '-';
   $('rocF').style.width = (v.rocN ? v.roc : 0) + '%';
@@ -418,7 +447,9 @@ function tickerText(l){
   if(l.k === 'score') return (l.ours ? '🎉 ' : '') + l.line;
   if(l.k === 'drive') return l.line;
   if(l.k === 'synced') return 'Lined up with this TV (' + (l.d / 1000).toFixed(0) + ' s behind real time, ' + l.n + ' tap' + (l.n > 1 ? 's' : '') + ')';
-  if(l.k === 'ruling') return 'Review: the call ' + (l.v === 'overturned' ? 'was OVERTURNED' : 'STANDS');
+  if(l.k === 'ruling') return 'Review: the call ' + (l.v === 'overturned' ? 'was OVERTURNED' : 'STANDS') + (l.fixed ? ' (corrected by the feed)' : '');
+  if(l.k === 'mode') return l.mode === 'drives' ? 'Now: drives only' : 'Now: calling every play';
+  if(l.k === 'review') return '🚩 Review flagged by ' + l.by;
   return '';
 }
 
@@ -469,9 +500,9 @@ function renderReview(r){
   $('rvTitle').textContent = r.state === 'done' ? (r.result === 'overturned' ? 'OVERTURNED' : r.result === 'stands' ? 'THE CALL STANDS' : 'NO REVIEW') : 'UNDER REVIEW';
   $('rvS').innerHTML = '<b>' + r.stands + '</b>STANDS'; $('rvO').innerHTML = '<b>' + r.over + '</b>OVERTURNED';
   $('rvS').classList.toggle('win', r.result === 'stands'); $('rvO').classList.toggle('win', r.result === 'overturned');
-  $('rvMeta').textContent = r.state === 'vote' ? 'Vote on your phone · ' + r.left + ' s' : r.state === 'wait' ? 'Votes are in. Waiting for the referee...' :
+  $('rvMeta').textContent = r.state === 'vote' ? 'Vote on your phone · ' + r.left + ' s' : r.state === 'wait' ? 'Votes are in. Tap the ruling on a phone when the referee announces it (or 1 / 2 here).' :
     r.state === 'ask' ? 'The feed has not said. What did the referee say? (on your phones)' :
-    (r.who && r.who.length ? '✅ ' + r.who.join(' · ') : 'Nobody had it');
+    (r.who && r.who.length ? '✅ ' + r.who.join(' · ') : 'Nobody had it') + (r.fixed ? ' · corrected by the feed' : '');
 }
 function renderEnd(v, S){
   $('endK').textContent = 'Final';
@@ -579,6 +610,10 @@ addEventListener('keydown', e => {
   if(k === 'c') runCam('key');
   if(k === 'r' && cam) cam.shout();
   if(k === 't') host.trivia();
+  if(k === 'm') toggleMode();
+  if(k === 'x') host.flag();
+  if(k === '1') host.act('_tv', {t: 'ref', v: 'stands'});
+  if(k === '2') host.act('_tv', {t: 'ref', v: 'overturned'});
   if(k === 'v') reel();
   if(k === '[') host.nudgeD(-1000);
   if(k === ']') host.nudgeD(1000);
@@ -599,7 +634,15 @@ if(Q.get('event') || Q.get('replay')){
   // a reload mid-game: offer the game that was running
   try {
     const last = JSON.parse(localStorage.getItem('gday_last') || 'null');
-    if(last && Date.now() - last.at < 12 * 3600e3) choose(last.c);
+    if(last && Date.now() - last.at < 12 * 3600e3){
+      choose(last.c);
+      const kept = JSON.parse(localStorage.getItem('gday_game_' + last.c.league + '_' + last.c.event) || 'null');
+      if(kept && !last.c.replay){
+        const n = Object.keys(JSON.parse(kept.S).players || {}).length;
+        $('chosen').insertAdjacentHTML('beforeend', '<div class="note">▶ Picking up where it left off: ' + n + ' player' + (n === 1 ? '' : 's') + ', scores kept, room ' + esc(kept.code || '') + '.</div>');
+        $('startBtn').textContent = 'Resume';
+      }
+    }
   } catch(e){}
 }
 $('startBtn').addEventListener('click', () => { try { localStorage.setItem('gday_last', JSON.stringify({c: choice, at: Date.now()})); } catch(e){} });

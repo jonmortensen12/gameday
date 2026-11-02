@@ -77,10 +77,45 @@ export function create(cfg = {}){
     log: [],                                // what the jumbotron announces
     clips: [],                              // reaction clips (just their labels; the video stays in the browser)
     lastPlay: null,
+    mode: cfg.mode === 'drives' ? 'drives' : 'plays',
+    alias: {},                              // device id -> player id, for phones that lost their saved id
   };
 }
 
+/* The room's mode, which the jumbotron can change at any time:
+   'plays'  - call every snap, and the next drive
+   'drives' - only the next drive (and reviews and trivia): for when the
+              room would rather watch than tap */
+export function setMode(S, mode, now){
+  const m = mode === 'drives' ? 'drives' : 'plays';
+  if(S.mode === m) return;
+  S.mode = m;
+  if(m === 'drives') Object.values(S.players).forEach(p => { p.picks = []; });
+  S.log.push({k: 'mode', at: now, mode: m});
+}
+
 /* ---------- people ---------- */
+/* Which player a phone is. Normally its device id (kept in the phone's
+   localStorage). A phone that lost it - a different browser, private
+   mode, cleared data - comes back with a new id but the same name: if a
+   player with that name is not connected right now, it is them, score and
+   all. 'fresh' (the phone's "not me") undoes that. */
+const key = n => clean(n).toLowerCase();
+export function resolve(S, dev, name, online){
+  if(S.players[dev]) return {id: dev, back: false};
+  if(S.alias[dev] && S.players[S.alias[dev]]) return {id: S.alias[dev], back: false};
+  const k = key(name);
+  const same = k && Object.values(S.players).find(p => key(p.name) === k && !(online && online(p.id)));
+  if(same){ S.alias[dev] = same.id; return {id: same.id, back: true}; }
+  return {id: dev, back: false};
+}
+export function fresh(S, dev, name, kid){
+  delete S.alias[dev];
+  let n = clean(name) || 'Cougar', i = 2;
+  const taken = x => Object.values(S.players).some(p => p.id !== dev && key(p.name) === key(x));
+  while(taken(n)) n = clean(name).slice(0, 11) + ' ' + i++;
+  return join(S, dev, n, kid);
+}
 export function join(S, id, name, kid){
   let p = S.players[id];
   if(!p) p = S.players[id] = {id, n: 0, score: 0, streak: 0, best: 0, right: 0, calls: 0,
@@ -95,7 +130,7 @@ function ticket(p, t){ p.tickets.push(t); if(p.tickets.length > 12) p.tickets.sp
 /* ---------- what phones do ---------- */
 export function call(S, id, now, v, big){
   const p = S.players[id];
-  if(!p || (v !== 'run' && v !== 'pass')) return;
+  if(!p || S.mode === 'drives' || (v !== 'run' && v !== 'pass')) return;
   p.picks.push({t: now, v, big: !!big});
   if(p.picks.length > 20) p.picks.shift();
   p.lastCall = {t: now, v, big: !!big};
@@ -108,7 +143,7 @@ export function driveVote(S, id, now, v){
 }
 
 export function flag(S, id, now){
-  const p = S.players[id];
+  const p = S.players[id] || (id === '_tv' ? {name: 'the TV'} : null);
   if(!p) return;
   if(S.rv && S.rv.state !== 'done') return;
   if(S.rv && now - S.rv.at < 60 * SEC) return;     // the same review, flagged twice
@@ -121,9 +156,13 @@ export function reviewVote(S, id, now, v){
   if(!r || r.state !== 'vote' || !S.players[id] || (v !== 'stands' && v !== 'overturned')) return;
   r.votes[id] = {v, t: now};
 }
+/* The ruling, from the room: as soon as voting has closed, anybody can say
+   what the referee announced (the feed takes a minute or two to say it,
+   and after four minutes the phones ask outright). If the feed later says
+   otherwise, the feed wins and the points move (see feed()). */
 export function refSaid(S, id, now, v){
   const r = S.rv;
-  if(!r || r.state !== 'ask') return;
+  if(!r || (r.state !== 'ask' && r.state !== 'wait')) return;
   if(v === 'none'){ r.state = 'done'; r.result = 'none'; r.doneAt = now; return; }
   if(v === 'stands' || v === 'overturned') settleReview(S, v, now, 'room');
 }
@@ -217,12 +256,15 @@ function settleReview(S, v, now, how){
   r.state = 'done'; r.result = v; r.how = how; r.doneAt = now;
   const by = S.players[r.by];
   if(by) pts(S, by, PTS.flag);
+  award(S, r, v, 1);
+  S.log.push({k: 'ruling', at: now, v});
+}
+function award(S, r, v, sign){
   Object.entries(r.votes).forEach(([id, x]) => {
     const p = S.players[id];
-    if(!p) return;
-    if(x.v === v){ pts(S, p, PTS.review); p.reviews++; }
+    if(!p || x.v !== v) return;
+    p.score += sign * PTS.review; p.reviews += sign;
   });
-  S.log.push({k: 'ruling', at: now, v});
 }
 function stepReview(S, now){
   const r = S.rv;
@@ -426,9 +468,18 @@ export function feed(S, N, now){
 
   // reviews the feed has settled
   const reviewed = N.plays.filter(p => p.review && p.review !== 'pending');
-  if(S.rv && S.rv.state !== 'done'){
-    const hit = reviewed.find(p => !S.rv.known[p.id] && p.wall >= S.rv.at - S.D - 5 * 60 * SEC);
-    if(hit) settleReview(S, hit.review, now, 'feed');
+  const R = S.rv;
+  if(R && (R.state !== 'done' || (R.how === 'room' && now - R.doneAt < 12 * 60 * SEC))){
+    const hit = reviewed.find(p => !R.known[p.id] && p.wall >= R.at - S.D - 5 * 60 * SEC);
+    if(hit && R.state !== 'done') settleReview(S, hit.review, now, 'feed');
+    else if(hit){
+      R.how = 'feed';
+      if(hit.review !== R.result){       // the room heard it wrong: the feed wins
+        award(S, R, R.result, -1); award(S, R, hit.review, 1);
+        R.result = hit.review; R.fixed = true;
+        S.log.push({k: 'ruling', at: now, v: hit.review, fixed: true});
+      }
+    }
   }
   reviewed.forEach(p => { S.rvKnown[p.id] = 1; });
 
@@ -508,7 +559,7 @@ function reviewView(S, now, p){
   if(!r) return null;
   if(r.state === 'done' && now - r.doneAt > 25 * SEC) return null;
   const v = {n: r.n, state: r.state, by: (S.players[r.by] || {}).name || '',
-    left: Math.max(0, Math.ceil((T.reviewVote - (now - r.at)) / 1000)), result: r.result};
+    left: Math.max(0, Math.ceil((T.reviewVote - (now - r.at)) / 1000)), result: r.result, how: r.how || '', fixed: !!r.fixed};
   if(p){ const m = r.votes[p.id]; v.mine = m ? m.v : null; if(r.state === 'done') v.right = m ? m.v === r.result : null; }
   else { v.stands = Object.values(r.votes).filter(x => x.v === 'stands').length; v.over = Object.values(r.votes).filter(x => x.v === 'overturned').length;
     if(r.state === 'done') v.who = Object.entries(r.votes).filter(([, x]) => x.v === r.result).map(([id]) => (S.players[id] || {}).name); }
@@ -532,7 +583,7 @@ export function phoneView(S, id, now){
   const me = b.find(x => x.id === id);
   const pend = p.picks.filter(c => c.t > S.last - 0).slice(-1)[0];
   return {
-    t: 'st', phase: S.phase, kid: p.kid ? 1 : 0,
+    t: 'st', phase: S.phase, kid: p.kid ? 1 : 0, mode: S.mode,
     me: {n: p.name, s: p.score, st: p.streak, best: p.best, rank: me ? me.rank : 0, of: b.length, right: p.right, calls: p.calls},
     pend: pend ? {v: pend.v, big: pend.big, t: pend.t} : null,
     tickets: p.tickets.slice(-T.ticketsKept).map(t => ({v: t.v, res: t.res, pts: t.pts, line: t.line, at: t.at, big: t.big, bigHit: t.bigHit, few: t.few, drive: t.drive, streak: t.streak})),
@@ -545,7 +596,7 @@ export function phoneView(S, id, now){
 
 export function jumboView(S, now){
   return {
-    phase: S.phase, score: scoreView(S), roc: rocMeter(S), rocN: S.roc.length,
+    phase: S.phase, mode: S.mode, score: scoreView(S), roc: rocMeter(S), rocN: S.roc.length,
     board: board(S).slice(0, 10), players: Object.keys(S.players).length,
     split: split(S, now), lastCall: S.lastCall || null, lastPlay: S.lastPlay,
     drive: driveView(S, null), review: reviewView(S, now, null), tv: tvView(S, now, null),
@@ -578,5 +629,7 @@ export function save(S){ return JSON.stringify(S); }
 export function load(json){
   const S = JSON.parse(json);
   if(!S || S.proto !== PROTO) return null;
+  if(!S.alias) S.alias = {};
+  if(S.mode !== 'drives') S.mode = 'plays';
   return S;
 }

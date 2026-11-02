@@ -71,6 +71,7 @@ try {
   ok(await tv.evaluate(() => GD.host.roomInfo().people.filter(p => p.on).length) === 3, 'the jumbotron sees three phones');
 
   // play along until the final whistle
+  let modeTested = false, rejoinTested = false;
   let sawTrivia = false, sawTvOnPhone = false, flagged = false, sawReview = false, answered = 0, calls = 0;
   const t0 = Date.now();
   while(Date.now() - t0 < 330000){
@@ -92,6 +93,43 @@ try {
       if(vis.drive && Math.random() < 0.2) await tap(p, '#driveBtns button >> nth=' + Math.floor(Math.random() * 4));
       if(Math.random() < 0.5){ await tap(p, Math.random() < 0.5 ? '#runBtn' : '#passBtn'); calls++; }
     }
+    // drives only, switched on from the jumbotron's keyboard, and back
+    if(!modeTested && v.n > 20 && !v.tv){
+      modeTested = true;
+      await tv.keyboard.press('m');
+      await sleep(1200);
+      const hidden = await phones[0].p.evaluate(() => document.getElementById('snap').classList.contains('hide'));
+      const drv = await tv.evaluate(() => document.body.classList.contains('drives'));
+      ok(hidden && drv, 'M switches the room to drives only: the phones lose RUN/PASS, the board grows the drive question');
+      await tv.keyboard.press('m');
+      await sleep(1200);
+      ok(!(await phones[0].p.evaluate(() => document.getElementById('snap').classList.contains('hide'))), 'M again: back to every play');
+    }
+    // people wander off: a reload, and a phone that comes back as a stranger
+    if(!rejoinTested && v.n > 50 && !v.tv && !v.rv){
+      rejoinTested = true;
+      const before = await tv.evaluate(() => Object.fromEntries(Object.values(GD.host.S.players).map(p => [p.name, p.score])));
+      await phones[1].p.reload();
+      await phones[1].p.waitForSelector('#mainScr:not(.hide)', {timeout: 15000}).catch(() => {});
+      ok(await phones[1].p.evaluate(() => !document.getElementById('mainScr').classList.contains('hide')), 'a reloaded phone is straight back in, no typing');
+      // a brand-new page has a brand-new device id (here sessionStorage; at
+      // the party: another browser, private mode, cleared data)
+      await phones[2].p.close();
+      await sleep(1500);
+      const again = await ctx.newPage();
+      watch(again, 'Jon again');
+      await again.setViewportSize({width: 390, height: 844});
+      await again.goto(base + 'play.html?local=1#' + code);
+      await again.fill('#nameIn', 'Jon');
+      await again.click('#joinBtn');
+      await again.waitForSelector('#back:not(.hide)', {timeout: 15000}).catch(() => {});
+      const backT = await again.evaluate(() => document.getElementById('backT').textContent);
+      phones[2].p = again;
+      await sleep(800);
+      const after = await tv.evaluate(() => Object.fromEntries(Object.values(GD.host.S.players).map(p => [p.name, p.score])));
+      ok(/Welcome back, Jon/.test(backT) && Object.keys(after).length === 3, 'Jon on a "new phone" gets his score back: "' + backT + '"');
+      ok(after.Ava >= before.Ava && after.Jon >= before.Jon, 'no score lost (Ava ' + before.Ava + ' -> ' + after.Ava + ', Jon ' + before.Jon + ' -> ' + after.Jon + ')');
+    }
     if(!flagged && v.n > 60){ flagged = true; await phones[2].p.click('#flagBtn'); await phones[2].p.click('#flagBtn'); }
     if(v.phase === 'final') break;
     await sleep(400);
@@ -103,6 +141,7 @@ try {
   ok(S.players.some(p => p.s > 0), 'points were scored');
   ok(sawTrivia && sawTvOnPhone && answered > 0, 'trivia ran on the jumbotron and the phones (' + answered + ' answers)');
   ok(sawReview, 'a review was flagged from a phone');
+  ok(modeTested && rejoinTested, 'the mode and rejoin checks ran');
   const tickets = await phones[0].p.evaluate(() => document.querySelectorAll('#tickets .tk').length);
   ok(tickets >= 2, 'a phone shows its results (' + tickets + ')');
   await tv.waitForFunction(() => document.getElementById('endOver').classList.contains('on') || document.getElementById('camWrap').classList.contains('on'), null, {timeout: 20000}).catch(() => {});
@@ -120,6 +159,33 @@ try {
   const clips = await tv.evaluate(async () => (await (await import('./cam.js')).listClips()).map(c => ({size: c.blob.size, pre: c.pre})));
   ok(clips.length >= 1 && clips[0].size > 20000, 'a reaction clip was saved: ' + (clips[0] ? Math.round(clips[0].size / 1024) + ' KB, ' + clips[0].pre.toFixed(1) + ' s before the shout' : 'none'));
   ok(clips.length && clips[0].pre >= 7.9, 'it starts at least 8 s before the shout');
+
+  console.log('the jumbotron reloads mid-game');
+  {
+    const tv2 = await ctx.newPage();
+    watch(tv2, 'tv2');
+    await tv2.goto(base + 'index.html?local=1&event=401756924&team=252&nocam=1&go=1&fresh=1');
+    await tv2.waitForFunction(() => window.GD && GD.host.room.code, null, {timeout: 15000});
+    const code2 = await tv2.evaluate(() => GD.host.room.code);
+    const ph = await ctx.newPage();
+    watch(ph, 'Uncle');
+    await ph.goto(base + 'play.html?local=1#' + code2);
+    await ph.fill('#nameIn', 'Uncle');
+    await ph.click('#joinBtn');
+    await ph.waitForSelector('#mainScr:not(.hide)', {timeout: 15000});
+    await tv2.evaluate(() => { Object.values(GD.host.S.players)[0].score = 77; });
+    await sleep(5000);                                  // saved every 4 s
+    await tv2.goto(base + 'index.html?local=1&event=401756924&team=252&nocam=1&go=1');   // a reload, minus fresh=1: carry on
+    await tv2.waitForFunction(() => window.GD && GD.host.room.code, null, {timeout: 60000}).catch(() => {});
+    const code3 = await tv2.evaluate(() => window.GD && GD.host.room.code);
+    ok(code3 === code2, 'same room code after the reload (' + code2 + ' -> ' + code3 + ')');
+    // the phone notices the old room went silent (8 s) and joins the new one
+    await tv2.waitForFunction(() => GD.host.roomInfo().people.some(p => p.on && p.n === 'Uncle'), null, {timeout: 30000}).catch(() => {});
+    await sleep(1000);
+    const shown = await ph.evaluate(() => document.getElementById('meS').textContent);
+    ok(shown === '77' && await tv2.evaluate(() => GD.host.roomInfo().people.some(p => p.on && p.n === 'Uncle')), 'the phone reconnected by itself and still shows its 77 points (' + shown + ')');
+    await tv2.close(); await ph.close();
+  }
 } catch(e){
   ok(false, 'threw: ' + e.message);
 } finally {

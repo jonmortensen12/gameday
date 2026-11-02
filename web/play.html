@@ -84,6 +84,14 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 #toast { position: fixed; left: 12px; right: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 30; padding: 16px; border-radius: 16px; font-size: 18px; font-weight: 800; text-align: center; transform: translateY(160%); transition: transform 0.35s; box-shadow: 0 10px 30px #000a; }
 #toast.on { transform: none; }
 #toast.right { background: #0f6b45; } #toast.wrong { background: #3a1820; } #toast.none { background: #1c2c55; }
+#reconn { position: sticky; top: 0; z-index: 6; background: #6b4a00; color: #fff3cf; text-align: center; padding: 12px; font-weight: 800; }
+#reconn small { display: block; font-weight: 400; opacity: 0.85; }
+#back { background: #0f4a33; border-color: var(--good); }
+#back .row { display: flex; gap: 10px; margin-top: 10px; }
+#back button { flex: 1; font-size: 14px; padding: 10px; }
+#driveCard.main h3 { font-size: 22px; }
+#driveCard.main #driveBtns button { font-size: 20px; padding: 24px 6px; }
+#modeNote { color: var(--dim); font-size: 13px; text-align: center; margin-top: 10px; }
 #top3 { color: var(--dim); font-size: 13px; text-align: center; margin-top: 12px; }
 
 /* trivia takes over the phone */
@@ -123,9 +131,15 @@ body.kid #tvA button { font-size: 24px; padding: 20px; }
 </div>
 
 <div id="mainScr" class="hide">
+  <div id="reconn" class="hide">Reconnecting to the TV...<small>Your score is safe. Tap to try now.</small></div>
   <div id="top"><span id="net"></span><span class="n" id="meN"></span><span class="st" id="meSt"></span><span class="r" id="meR"></span><span class="s" id="meS">0</span></div>
   <div class="wrap">
     <div id="score"></div>
+
+    <div class="card hide" id="back">
+      <b id="backT">Welcome back!</b>
+      <div class="row"><button id="backOk">That's me 👍</button><button id="backNo">Not me - start fresh</button></div>
+    </div>
 
     <div class="card hide" id="kickCard">
       <button id="kickBtn">🏈 KICK!</button>
@@ -149,6 +163,7 @@ body.kid #tvA button { font-size: 24px; padding: 20px; }
       <div id="tickets"></div>
     </div>
 
+    <div id="modeNote" class="hide">Drives only right now - just call how each drive ends.</div>
     <div class="card hide" id="driveCard">
       <h3 id="driveH">How does the next drive end?</h3>
       <div class="grid2" id="driveBtns">
@@ -212,20 +227,26 @@ function joinNow(){
   connect();
 }
 $('joinBtn').onclick = joinNow;
+let lostAt = 0;
 function connect(){
   if(handle){ try { handle.destroy(); } catch(e){} handle = null; }
   conn = null; netState(false);
+  if(!lostAt) lostAt = Date.now();
   handle = GDNet.join(code, {
     timeout: 15000,
     open: c => {
-      conn = c; retries = 0; netState(true);
+      conn = c; retries = 0; lostAt = 0; heard = Date.now(); netState(true);
       c.on('data', onData);
       c.on('close', () => { if(conn === c){ conn = null; netState(false); later(); } });
       tx({t: 'hello', dev, name: recall('gday_name'), kid});
       $('joinScr').classList.add('hide'); $('mainScr').classList.remove('hide');
     },
     error: type => {
-      if(!$('mainScr').classList.contains('hide')) return later();
+      if(!$('mainScr').classList.contains('hide')){
+        // a long time without the room: maybe the TV opened a new one
+        if(type === 'peer-unavailable' && Date.now() - lostAt > 60000) $('reconn').innerHTML = 'Can\'t find room ' + code + '.<small>Still trying. If the TV shows a different code, scan it again - your score is kept.</small>';
+        return later();
+      }
       $('joinMsg').textContent = type === 'peer-unavailable' ? 'No game with that code. Check the TV.' : 'Could not connect (' + type + '). Trying again...';
       later();
     }
@@ -233,23 +254,54 @@ function connect(){
 }
 function later(){
   clearTimeout(retryTimer);
-  const wait = Math.min(15000, 1000 * Math.pow(1.6, retries++));
+  const wait = Math.min(8000, 800 * Math.pow(1.5, retries++));
   retryTimer = setTimeout(() => { if(joined && !conn) connect(); }, wait);
 }
-function netState(on){ $('net').classList.toggle('off', !on); }
+function netState(on){
+  $('net').classList.toggle('off', !on);
+  clearTimeout(netState.t);
+  // a blip is not worth a banner; a real drop is
+  if(on){ $('reconn').classList.add('hide'); $('reconn').innerHTML = 'Reconnecting to the TV...<small>Your score is safe. Tap to try now.</small>'; }
+  else netState.t = setTimeout(() => { if(!conn && joined) $('reconn').classList.remove('hide'); }, 1500);
+}
+$('reconn').onclick = () => { retries = 0; connect(); };
+function wake2(){ keepAwake(); if(joined && !conn){ retries = 0; connect(); } }
+addEventListener('pageshow', wake2);
+addEventListener('pagehide', e => { if(!e.persisted) tx({t: 'bye'}); });
+addEventListener('online', wake2);
+addEventListener('focus', wake2);
 setInterval(() => tx({t: 'ping'}), 2500);
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible'){ keepAwake(); if(joined && !conn){ retries = 0; connect(); } }
 });
 let wake = null;
 async function keepAwake(){ try { if(navigator.wakeLock && !wake){ wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch(e){} }
-if(hashCode && recall('gday_name') && recall('gday_code') === hashCode) joinNow();   // a reload: straight back in
+/* Coming back: a phone that has joined before goes straight back in -
+   reopened tab, reload, the QR scanned again, or the page found again in
+   the browser's history - with no typing. A different code in the link
+   means a different room, which is joined the same way. */
+if(recall('gday_name') && (hashCode || recall('gday_code'))) joinNow();
 
 /* ---------- what the TV says ---------- */
 let V = null, seenTickets = null, lastToast = 0;
+/* The TV sends every phone something at least every 3 s. Silence for 8 s
+   means the connection is dead even if the browser has not noticed (the
+   jumbotron reloaded, the wifi dropped, the phone slept): start again. */
+let heard = Date.now();
+setInterval(() => {
+  if(conn && joined && Date.now() - heard > 8000){ heard = Date.now(); retries = 0; connect(); }
+}, 2000);
 function onData(m){
+  heard = Date.now();
   if(!m || typeof m !== 'object') return;
   if(m.t === 'st'){ V = m; render(); }
+  if(m.t === 'host'){
+    if(m.name) store('gday_name', m.name);
+    if(m.back){
+      $('backT').textContent = 'Welcome back, ' + m.back.n + '! You have ' + m.back.s + ' points.';
+      $('back').classList.remove('hide');
+    }
+  }
 }
 function buzz(p){ try { navigator.vibrate && navigator.vibrate(p); } catch(e){} }
 function toast(text, cls){
@@ -287,9 +339,10 @@ function render(){
       btns.querySelectorAll('button').forEach(b => { b.classList.toggle('sel', b.dataset.v === r.mine); b.onclick = () => { tx({t: 'rvote', v: b.dataset.v}); buzz(15); }; });
       $('rvWhy').textContent = 'Voting closes in ' + r.left + ' s · flagged by ' + r.by;
     } else if(r.state === 'wait'){
-      $('rvH').textContent = '🚩 Votes are in';
-      btns.innerHTML = '';
-      $('rvWhy').textContent = 'You said ' + (r.mine ? (r.mine === 'stands' ? 'it STANDS' : 'OVERTURNED') : 'nothing') + '. Waiting for the referee...';
+      $('rvH').textContent = '🚩 Votes are in. What did the ref announce?';
+      btns.innerHTML = '<button data-v="stands">It STANDS</button><button data-v="overturned">OVERTURNED</button>';
+      btns.querySelectorAll('button').forEach(b => b.onclick = () => tx({t: 'ref', v: b.dataset.v}));
+      $('rvWhy').textContent = 'You said ' + (r.mine ? (r.mine === 'stands' ? 'it STANDS' : 'OVERTURNED') : 'nothing') + '. Tap the ruling when the referee announces it - first tap counts, and the feed double-checks it.';
     } else if(r.state === 'ask'){
       $('rvH').textContent = 'What did the referee say?';
       btns.innerHTML = '<button data-v="stands">It STANDS</button><button data-v="overturned">OVERTURNED</button><button data-v="none" style="grid-column:1/3">There was no review</button>';
@@ -297,7 +350,7 @@ function render(){
       $('rvWhy').textContent = 'The feed has not said. First answer counts.';
     } else {
       $('rvH').textContent = r.result === 'none' ? 'No review after all' : (r.result === 'overturned' ? 'OVERTURNED' : 'The call STANDS') + (r.right === true ? ' · ✅ +40' : r.right === false ? ' · ❌' : '');
-      btns.innerHTML = ''; $('rvWhy').textContent = '';
+      btns.innerHTML = ''; $('rvWhy').textContent = r.fixed ? 'Corrected by the official feed.' : '';
     }
   }
   // the snap
@@ -310,7 +363,7 @@ function render(){
     const what = t.drive ? 'Drive: ' + LABEL[t.v] : LABEL[t.v] + (t.big ? ' 🔥' : '');
     html += '<div class="tk"><span class="ic">' + ic + '</span><span class="tx"><b>' + esc(what) + '</b> · ' + esc(t.line || '') + '</span>' + (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div>';
   });
-  $('tickets').innerHTML = html || '<div class="tk"><span class="tx">Tap RUN or PASS before each snap. You\'ll see if you were right about 30 seconds later, once the play reaches the feed.</span></div>';
+  $('tickets').innerHTML = html || (v.mode === 'drives' ? '' : '<div class="tk"><span class="tx">Tap RUN or PASS before each snap. You\'ll see if you were right about 30 seconds later, once the play reaches the feed.</span></div>');
   // a new result: say so
   const key = tk.map(t => t.at + t.line).join('|');
   if(seenTickets !== null && tk[0] && key !== seenTickets && !seenTickets.startsWith(tk[0].at + tk[0].line)){
@@ -320,6 +373,15 @@ function render(){
     else toast('➖ ' + esc(t.line || 'No call on that one'), 'none');
   }
   seenTickets = key;
+  // drives only: no run/pass, the drive question is the game
+  const drivesOnly = v.mode === 'drives';
+  $('snap').classList.toggle('hide', drivesOnly);
+  $('modeNote').classList.toggle('hide', !drivesOnly);
+  $('driveCard').classList.toggle('main', drivesOnly);
+  if(drivesOnly){
+    // results still matter: show them under the drive question
+    if($('tickets').parentNode !== $('driveCard')) $('driveCard').appendChild($('tickets'));
+  } else if($('tickets').parentNode !== $('snap')) $('snap').appendChild($('tickets'));
   // the drive
   const d = v.drive;
   $('driveCard').classList.toggle('hide', !d);
@@ -330,6 +392,9 @@ function render(){
   // trivia
   renderTv(v.tv);
 }
+
+$('backOk').onclick = () => $('back').classList.add('hide');
+$('backNo').onclick = () => { $('back').classList.add('hide'); tx({t: 'fresh', dev, name: recall('gday_name'), kid}); };
 
 /* the snap: RUN or PASS, stamped by the TV the moment it arrives */
 let big = false, lockT = 0;

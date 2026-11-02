@@ -71,6 +71,18 @@ behind the TV, so the feed can never open or close a call. Instead:
   the same clock. 15 pts + up to 5 for speed.
 - **ROC meter** — the room's accuracy over its last 40 calls.
 
+**Two modes**, switched on the setup screen, with `M` or the mode button on
+the board, at any time: *every play* (all of the above) and *drives only*
+(no RUN/PASS; the drive question is the game; reviews and trivia carry on).
+Switching drops calls not yet settled; nothing already scored changes.
+
+**Reviews, by hand**: 🚩 on any phone (tap twice) or `X` / the 🚩 button on
+the jumbotron opens one. Once the 45 s vote closes, any phone (or `1` / `2`
+on the jumbotron) can say the ruling the moment the referee announces it.
+The feed still checks: if its ruling turns up within 12 minutes and
+differs, the points move to the right voters and the board says "corrected
+by the feed".
+
 ## The jumbotron
 
 Dim and still while the game is on (`body.quiet`); full brightness for
@@ -92,20 +104,41 @@ awards. **It makes no sound at all.**
 - The game saves every 4 s with its room code; a reload (or the laptop
   sleeping) carries on, and phones reconnect by themselves.
 
+## Coming back (people use their phones for other things)
+
+- Scores live on the jumbotron, saved every 4 s with the room code. A
+  phone holds nothing that matters.
+- A phone that has joined before goes straight back in when the page is
+  reopened, reloaded, found in history or the QR scanned again: no typing.
+- A phone that hears nothing for 8 s reconnects (the TV sends at least
+  every 3 s), and again on returning to the tab, `pageshow`, `online`,
+  `focus`. A banner shows after 1.5 s without the room; tapping it retries.
+- A phone that lost its saved id (another browser, private mode, cleared
+  data) and types the same name gets that player's score back, if that
+  player has not been heard from for 4 s. It is told "Welcome back, Jon!
+  You have 135 points" with a "Not me - start fresh" button (which makes
+  "Jon 2").
+- The jumbotron reloading keeps the code (it asks the broker for it again
+  for up to 3 minutes); phones rejoin by themselves.
+
 ## Phone protocol
 
 phone → host: `hello {dev, name, kid}`, `call {v: run|pass, big}`,
 `drive {v}`, `flag`, `rvote {v}`, `ref {v: stands|overturned|none}`,
-`kick`, `ad`, `ans {n, i}`, `ping` (every 2.5 s; 8 s silent = away).
-host → phone: `host`, then `st` (the whole view for that phone, sent when it
+`kick`, `ad`, `ans {n, i}`, `fresh {dev, name, kid}` ("not me"), `bye`
+(the page closed), `ping` (every 2.5 s; 8 s silent = away).
+host → phone: `host {code, name, back: {n, s} | null}`, then `st` (the whole view for that phone, sent when it
 changes) — see `phoneView` in `game.js`.
 
 ## Testing
 
-- `node gamecheck.mjs` — three recorded games (`tests/fixtures/`) through
-  `game.js` with simulated people, at antenna and streaming delays.
+- `node gamecheck.mjs` — four recorded games (`tests/fixtures/`, one NFL)
+  through `game.js` with simulated people, at antenna and streaming delays;
+  drives-only, a switch at halftime, the room giving wrong rulings that the
+  feed corrects, and rejoining by name.
 - `node netcheck.mjs` — real pages in Chromium, ESPN served from a fixture,
-  fake camera and mic.
+  fake camera and mic; the mode switch, a phone reloading, a phone coming
+  back as a stranger, the jumbotron reloading.
 - `node camcheck.mjs` — people finding on a built living-room picture.
 - **Rehearse**: setup → "rehearse with a finished game" plays a real feed
   back as if live (25–55 s lag per play). With the game's replay video:

@@ -26,14 +26,14 @@ import * as G from './web/game.js';
 let fails = 0;
 function ok(c, msg){ console.log((c ? '  ok   ' : '  FAIL ') + msg); if(!c) fails++; }
 
-async function run(file, team, Dtrue, label){
+async function run(file, team, Dtrue, label, opts = {}){
   console.log('\n' + label + ' (' + file + '), TV ' + Dtrue / 1000 + ' s behind');
   const raw = JSON.parse(fs.readFileSync('tests/fixtures/' + file));
   const N = normalize(raw);
   let cur = 0;
   const src = replaySource('cfb', 'x', {summary: N, clock: () => cur, preroll: 180});
   await src.ready;
-  let SS = G.create({team, seed: 7});
+  let SS = G.create({team, seed: 7, mode: opts.mode});
   const S0 = SS;
   const ids = ['oracle', 'cheater', 'coin', 'tapper', 'driver', 'flagger', 'kid'];
   ids.forEach(id => G.join(SS, id, id, id === 'kid'));
@@ -55,6 +55,10 @@ async function run(file, team, Dtrue, label){
   reviews.forEach(r => {
     events.push({t: tvOf(r.at) + 15000, f: () => G.flag(SS, 'flagger', src.now())});
     events.push({t: tvOf(r.at) + 25000, f: () => G.reviewVote(SS, 'flagger', src.now(), r.v)});
+    // the room says the ruling as soon as voting closes - sometimes wrongly,
+    // which the feed must put right when it gets there
+    if(opts.room) events.push({t: tvOf(r.at) + 70000, f: () => G.refSaid(SS, 'coin', src.now(),
+      opts.room === 'wrong' ? (r.v === 'stands' ? 'overturned' : 'stands') : r.v)});
   });
   events.sort((a, b) => a.t - b.t);
 
@@ -88,13 +92,25 @@ async function run(file, team, Dtrue, label){
       maxJumbo = Math.max(maxJumbo, JSON.stringify(G.jumboView(SS, now)).length);
     }
     // halfway through, the jumbotron is reloaded: the game must carry on
-    if(!reloads && SS.phase === 'half'){ SS = G.load(G.save(SS)); reloads++; }
+    if(!reloads && SS.phase === 'half'){ SS = G.load(G.save(SS)); reloads++; if(opts.switchAtHalf) G.setMode(SS, opts.switchAtHalf, now); }
     cur += 1000;
   }
   const P = SS.players;
   const acc = id => P[id].calls ? P[id].right / P[id].calls : 0;
   const runs = calls.filter(p => p.kind === 'run').length;
   console.log('  ' + calls.length + ' plays to call (' + runs + ' runs), ' + kicks.length + ' kickoffs, ' + N.drives.length + ' drives, ' + reviews.length + ' reviews');
+  if(opts.mode === 'drives'){
+    ok(Object.values(P).every(p => p.calls === 0), 'drives only: no play calls are taken');
+    ok(P.driver.drives >= N.drives.filter(d => d.result && d.result !== 'void').length * 0.8, 'drives only: drive questions settle (' + P.driver.drives + ')');
+    ok(SS.phase === 'final' && rounds >= 4, 'drives only: trivia and the game still run (' + rounds + ' rounds)');
+    return;
+  }
+  if(opts.switchAtHalf){
+    const firstHalf = calls.filter(p => p.period <= 2).length;
+    ok(P.oracle.calls >= firstHalf * 0.9 && P.oracle.calls <= firstHalf + 2, 'switched to drives at halftime: calls settled ' + P.oracle.calls + ', first-half plays ' + firstHalf);
+    ok(acc('oracle') > 0.97, 'and the first half still scored right: ' + Math.round(100 * acc('oracle')) + '%');
+    return;
+  }
   ok(Math.abs(SS.D - Dtrue) < 1500, 'D measured from kickoff taps: ' + (SS.D / 1000).toFixed(1) + ' s (true ' + Dtrue / 1000 + ')');
   ok(P.oracle.calls >= calls.length * 0.9, 'every play got the oracle\'s call settled: ' + P.oracle.calls + ' of ' + calls.length);
   ok(acc('oracle') > 0.97, 'calls made before the snap score: oracle ' + Math.round(100 * acc('oracle')) + '%');
@@ -107,7 +123,8 @@ async function run(file, team, Dtrue, label){
   ok(rounds >= 4, 'trivia rounds in breaks: ' + rounds);
   ok(halfRound, 'a halftime round');
   if(reviews.length){
-    ok(P.flagger.reviews === reviews.length, 'reviews settled from the feed: ' + P.flagger.reviews + ' of ' + reviews.length);
+    ok(P.flagger.reviews === reviews.length, 'reviews settled' + (opts.room ? ' (room said ' + (opts.room === 'wrong' ? 'the WRONG ruling, the feed corrected it)' : 'the ruling first)') : ' from the feed') + ': flagger right on ' + P.flagger.reviews + ' of ' + reviews.length);
+    ok(P.flagger.reviews * G.PTS.review + reviews.length * G.PTS.flag + P.flagger.tvRight * 0 <= P.flagger.score, 'and the flagger has the points for it: ' + P.flagger.score);
   }
   ok(P.oracle.tvRight > 0 && P.kid.score > 0, 'trivia scores: oracle ' + P.oracle.tvRight + ' right, kid ' + P.kid.score + ' pts');
   ok(SS.phase === 'final', 'the game ends: ' + SS.phase);
@@ -127,9 +144,32 @@ async function run(file, team, Dtrue, label){
   }
 }
 
+// who is who: a phone that lost its saved id gets its score back by name
+{
+  console.log('\nrejoining');
+  const S = G.create({team: '252'});
+  G.join(S, 'devA', 'Grandpa'); S.players.devA.score = 120;
+  let r = G.resolve(S, 'devA', 'Grandpa');
+  ok(r.id === 'devA' && !r.back, 'the same phone is the same player');
+  r = G.resolve(S, 'devB', ' grandpa ');
+  ok(r.id === 'devA' && r.back, 'a new phone with the same name gets the score back');
+  ok(G.resolve(S, 'devB', 'anything').id === 'devA', 'and keeps it after');
+  G.join(S, 'devC', 'Mom');
+  r = G.resolve(S, 'devD', 'Mom', id => id === 'devC');
+  ok(r.id === 'devD', 'but not the score of somebody connected right now');
+  const p = G.fresh(S, 'devB', 'Grandpa');
+  ok(p.id === 'devB' && p.name === 'Grandpa 2' && S.players.devA.score === 120, '"not me" starts fresh as ' + p.name + ', the real Grandpa keeps 120');
+  const S2 = G.load(G.save(S));
+  ok(S2.players.devA.score === 120 && G.resolve(S2, 'devB', 'Grandpa 2').id === 'devB', 'all of it survives the jumbotron reloading');
+}
+
 await run('byu-utah-2025.json', '252', 8000, 'BYU 24, Utah 21 (2025), over an antenna');
 await run('byu-utah-2025.json', '252', 45000, 'The same game on a streaming app');
 await run('utah-isu-2026.json', '254', 5000, 'Utah at Iowa State (2026): three reviews');
+await run('utah-isu-2026.json', '254', 5000, 'The same, the room calling the rulings - wrongly', {room: 'wrong'});
+await run('nfl-phi-wsh-2026.json', '21', 30000, 'NFL: Eagles at Commanders (2026), streamed', {league: 'nfl'});
+await run('byu-utah-2025.json', '252', 8000, 'Drives only', {mode: 'drives'});
+await run('byu-utah-2025.json', '252', 8000, 'Every play, switched to drives only at halftime', {switchAtHalf: 'drives'});
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall good');
 process.exit(fails ? 1 : 0);
