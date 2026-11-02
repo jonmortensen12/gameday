@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#04102a">
+<title>Game Day</title>
+<link rel="icon" href="icon.svg">
+<style>
+/* The jumbotron sits beside the real TV. While the game is on it is dim
+   and still - a scoreboard, not a show - and it only comes up during
+   breaks, reviews and after a BYU score. It never makes a sound. */
+:root { --bg:#04102a; --panel:#0a1d45; --line:#1d3a75; --ink:#f2f6ff; --dim:#8ea6d6; --blue:#0062b8; --royal:#0047ba; --gold:#ffd25e; --good:#5ee6a0; --bad:#ff6b7d; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 18px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+button { font: inherit; font-weight: 700; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; cursor: pointer; }
+button:hover { border-color: #4f7fd6; }
+button.go { background: linear-gradient(180deg, #1f74d8, #0047ba); border-color: #6fa6ff; }
+.hide { display: none !important; }
+
+/* ---- setup ---- */
+#setup { position: fixed; inset: 0; overflow-y: auto; padding: 40px; display: flex; justify-content: center; background: radial-gradient(ellipse at 50% 0%, #12306b 0%, var(--bg) 60%); z-index: 50; }
+#setup .card { width: 100%; max-width: 760px; }
+#setup h1 { font-size: 64px; margin: 0; letter-spacing: 0.06em; font-weight: 900; }
+#setup h1 span { color: #7fb2ff; }
+#setup .sub { color: var(--dim); margin: 4px 0 28px; }
+#setup h2 { font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin: 28px 0 10px; }
+#setup .big { display: block; width: 100%; text-align: left; padding: 18px 20px; font-size: 22px; margin-bottom: 10px; }
+#setup .big small { display: block; font-weight: 400; color: var(--dim); font-size: 15px; margin-top: 4px; }
+#setup .row { display: flex; flex-wrap: wrap; gap: 8px; }
+#setup .row button { font-size: 15px; padding: 10px 12px; }
+#setup .row button.sel { background: var(--royal); border-color: #8db8ff; }
+#setup label { display: flex; align-items: center; gap: 10px; color: var(--dim); margin-top: 10px; }
+#setup input[type=checkbox] { width: 22px; height: 22px; }
+#games { max-height: 280px; overflow-y: auto; }
+#teamPick { margin-top: 10px; }
+#chosen { margin-top: 24px; padding: 16px 18px; border-radius: 14px; background: #071634; border: 1px solid var(--line); }
+#startBtn { margin-top: 14px; width: 100%; font-size: 26px; padding: 18px; }
+.note { color: var(--dim); font-size: 14px; margin-top: 8px; }
+
+/* ---- the board ---- */
+#board { position: fixed; inset: 0; display: grid; grid-template-columns: 300px 1fr 360px; grid-template-rows: auto 1fr auto; gap: 18px; padding: 22px; transition: opacity 1.2s; }
+body.quiet #board { opacity: 0.62; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+.lbl { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+#scorebug { grid-column: 1 / 4; display: flex; align-items: center; gap: 22px; padding: 12px 22px; }
+.tm { display: flex; align-items: center; gap: 12px; font-size: 30px; font-weight: 800; }
+.tm .sw { width: 14px; height: 40px; border-radius: 4px; }
+.tm .pts { font-size: 44px; font-variant-numeric: tabular-nums; min-width: 56px; text-align: right; }
+#detail { color: var(--dim); font-size: 18px; }
+#feedDot { margin-left: auto; font-size: 14px; color: var(--dim); display: flex; align-items: center; gap: 8px; }
+#feedDot i { width: 10px; height: 10px; border-radius: 50%; background: #555; display: inline-block; }
+#feedDot.ok i { background: var(--good); } #feedDot.down i { background: var(--bad); }
+#left { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+#join { text-align: center; }
+#qr { width: 220px; height: 220px; border-radius: 10px; background: #fff; }
+#code { font-size: 40px; font-weight: 900; letter-spacing: 0.25em; margin-top: 6px; }
+#joinUrl { font-size: 12px; color: var(--dim); word-break: break-all; }
+#roc .bar { height: 22px; border-radius: 11px; background: #06122c; overflow: hidden; border: 1px solid var(--line); }
+#roc .fill { height: 100%; background: linear-gradient(90deg, #1f74d8, #8fc2ff); width: 0; transition: width 1.5s; }
+#roc .big { font-size: 40px; font-weight: 900; }
+#center { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+#next .split { display: flex; height: 92px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); font-size: 30px; font-weight: 900; }
+#next .split div { display: flex; align-items: center; justify-content: center; transition: flex-grow 1.2s; min-width: 120px; }
+#next .run { background: #13366f; } #next .pass { background: #0b5bb8; }
+#next .none { color: var(--dim); font-size: 20px; padding: 26px 0; text-align: center; }
+#last { font-size: 21px; min-height: 2.6em; }
+#last .ok { color: var(--good); font-weight: 800; } #last .no { color: var(--dim); }
+#drive .opts { display: flex; gap: 10px; }
+#drive .opts div { flex: 1; background: #06122c; border-radius: 12px; padding: 10px; text-align: center; border: 1px solid var(--line); }
+#drive .opts b { display: block; font-size: 30px; }
+#kickBox { border-color: var(--gold); }
+#kickBox b { color: var(--gold); font-size: 26px; }
+#lb ol { list-style: none; margin: 0; padding: 0; }
+#lb li { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid #12295a; font-size: 22px; }
+#lb li .r { width: 30px; color: var(--dim); font-weight: 800; }
+#lb li .n { flex: 1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#lb li .s { font-variant-numeric: tabular-nums; font-weight: 800; }
+#lb li .f { width: 44px; text-align: right; font-size: 16px; color: var(--gold); }
+#lb li.off { opacity: 0.45; }
+#foot { grid-column: 1 / 4; display: flex; gap: 18px; align-items: center; color: var(--dim); font-size: 15px; }
+#foot .sp { flex: 1; }
+#ticker { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- the moments ---- */
+.over { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 50px; background: radial-gradient(ellipse at 50% 30%, #0f2d6bf5 0%, #04102af8 70%); opacity: 0; pointer-events: none; transition: opacity 0.6s; text-align: center; }
+.over.on { opacity: 1; pointer-events: auto; }
+.over .kicker { font-size: 22px; letter-spacing: 0.25em; text-transform: uppercase; color: #9cc1ff; margin-bottom: 18px; }
+#tvQ { font-size: 50px; font-weight: 800; max-width: 1400px; line-height: 1.2; }
+#tvA { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 40px; width: 100%; max-width: 1400px; }
+#tvA div { background: #0b2457; border: 2px solid #2b56a8; border-radius: 18px; padding: 22px; font-size: 34px; font-weight: 700; text-align: left; display: flex; gap: 16px; align-items: center; transition: background 0.4s, opacity 0.4s; }
+#tvA div i { font-style: normal; width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #1a3f86; flex: none; }
+#tvA div.right { background: #0f6b45; border-color: var(--good); }
+#tvA div.wrong { opacity: 0.35; }
+#tvMeta { margin-top: 28px; font-size: 22px; color: var(--dim); min-height: 1.4em; }
+#tvKid { margin-top: 14px; font-size: 20px; color: #b9cdf5; }
+#tvClock { position: absolute; top: 40px; right: 60px; font-size: 64px; font-weight: 900; color: var(--gold); font-variant-numeric: tabular-nums; }
+#rvTitle { font-size: 96px; font-weight: 900; letter-spacing: 0.05em; }
+#rvBars { display: flex; gap: 30px; margin-top: 40px; }
+#rvBars div { width: 380px; padding: 26px; border-radius: 20px; background: #0b2457; border: 2px solid #2b56a8; font-size: 34px; font-weight: 800; }
+#rvBars div b { display: block; font-size: 80px; }
+#rvBars div.win { background: #0f6b45; border-color: var(--good); }
+#rvMeta { margin-top: 30px; font-size: 26px; color: var(--dim); }
+#celebT { font-size: 120px; font-weight: 900; letter-spacing: 0.03em; line-height: 1; background: linear-gradient(180deg, #fff, #8fc2ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#celebL { font-size: 30px; margin-top: 26px; color: #d7e5ff; max-width: 1300px; }
+#awards { display: grid; grid-template-columns: repeat(2, minmax(0, 520px)); gap: 16px; margin-top: 34px; text-align: left; }
+#awards div { background: #0b2457; border: 1px solid #2b56a8; border-radius: 16px; padding: 16px 22px; font-size: 22px; }
+#awards b { display: block; font-size: 30px; }
+#awards span { color: var(--gold); font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; }
+
+/* the Cougar Cam and the reaction replays: a picture inside a stadium frame */
+#camWrap { position: fixed; inset: 0; z-index: 30; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
+#camWrap.on { opacity: 1; }
+#camCv, #replayV { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#camWrap .frame { position: absolute; inset: 18px; border: 6px solid #ffffffd0; border-radius: 10px; box-shadow: inset 0 0 120px #000a; pointer-events: none; }
+#camWrap .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, #0000 0 3px, #0002 3px 4px); pointer-events: none; }
+#camTag { position: absolute; top: 44px; left: 52px; background: var(--royal); padding: 10px 20px; border-radius: 8px; font-size: 30px; font-weight: 900; letter-spacing: 0.1em; }
+#camTag i { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #ff3b4e; margin-right: 12px; vertical-align: middle; }
+#camCap { position: absolute; bottom: 60px; left: 0; right: 0; text-align: center; font-size: 64px; font-weight: 900; text-shadow: 0 4px 18px #000; }
+#camSub { position: absolute; bottom: 26px; left: 0; right: 0; text-align: center; font-size: 22px; color: #dfe9ff; text-shadow: 0 2px 8px #000; }
+#status { position: fixed; right: 12px; bottom: 8px; z-index: 40; font-size: 12px; color: #6f86b6; }
+#help { position: fixed; inset: auto 20px 40px auto; z-index: 45; background: #071634f0; border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; font-size: 15px; line-height: 1.7; }
+#help kbd { background: #1a3366; border-radius: 5px; padding: 1px 7px; font: inherit; font-weight: 700; }
+</style>
+</head>
+<body class="quiet">
+
+<div id="setup">
+  <div class="card">
+    <h1>GAME <span>DAY</span></h1>
+    <div class="sub">The second screen for the game: call plays, trivia in the breaks, the Cougar Cam.</div>
+
+    <h2>The game</h2>
+    <button class="big go" id="pickMain">BYU at Utah<small>Saturday, November 7 · 10:00 a.m. · ABC · the room roots for BYU</small></button>
+
+    <h2>Try it on another game first</h2>
+    <div id="games" class="row"><span class="note">Looking for games...</span></div>
+    <div id="teamPick" class="row hide"></div>
+
+    <h2>Or rehearse with a finished game</h2>
+    <div class="row" id="replays">
+      <button data-ev="401756924" data-team="252">BYU 24, Utah 21 (2025)</button>
+      <button data-ev="401856843" data-team="252">BYU 27, Arizona State 20 (last week)</button>
+      <button data-ev="401856816" data-team="254">Utah at Iowa State (has reviews)</button>
+    </div>
+    <div class="note">A rehearsal plays the real feed back from kickoff, as if live. Find the game's replay video, start it, and tap KICK on a phone at the opening kickoff - the game lines itself up with the video. <b>P</b> pauses along with the video.</div>
+    <div class="row" id="speeds" style="margin-top:8px"><button data-s="1" class="sel">Real time</button><button data-s="4">4× (a quick look)</button><button data-s="20">20×</button></div>
+
+    <h2>The room</h2>
+    <label><input type="checkbox" id="useCam" checked> Use this laptop's camera and microphone (Cougar Cam, reaction replays)</label>
+    <div class="note">Put the laptop beside the TV, facing the couch. Nothing it records leaves this laptop.</div>
+
+    <div id="chosen" class="hide"></div>
+    <button class="go hide" id="startBtn">Start</button>
+  </div>
+</div>
+
+<div id="board">
+  <div id="scorebug" class="panel">
+    <div class="tm"><div class="sw" id="usSw"></div><span id="usN">BYU</span><span class="pts" id="usS">0</span></div>
+    <div class="tm"><div class="sw" id="themSw"></div><span id="themN">UTAH</span><span class="pts" id="themS">0</span></div>
+    <div id="detail"></div>
+    <div id="feedDot"><i></i><span>feed</span></div>
+  </div>
+  <div id="left">
+    <div id="join" class="panel">
+      <div class="lbl">Join on your phone</div>
+      <canvas id="qr" width="440" height="440"></canvas>
+      <div id="code">····</div>
+      <div id="joinUrl"></div>
+    </div>
+    <div id="roc" class="panel">
+      <div class="lbl">ROC meter · the room's calls</div>
+      <div class="big" id="rocN">-</div>
+      <div class="bar"><div class="fill" id="rocF"></div></div>
+    </div>
+  </div>
+  <div id="center">
+    <div id="kickBox" class="panel hide"><b>🏈 Tap KICK on your phone the moment the ball is kicked</b><div class="note" id="kickNote">That lines the game up with this TV.</div></div>
+    <div id="next" class="panel">
+      <div class="lbl">Next snap · the room's call</div>
+      <div id="splitBox"></div>
+    </div>
+    <div id="lastBox" class="panel">
+      <div class="lbl">Last play</div>
+      <div id="last"><span class="no">Waiting for kickoff.</span></div>
+    </div>
+    <div id="drive" class="panel">
+      <div class="lbl" id="driveL">Next drive</div>
+      <div class="opts" id="driveO"></div>
+    </div>
+  </div>
+  <div id="lb" class="panel">
+    <div class="lbl">Leaderboard</div>
+    <ol id="lbList"></ol>
+  </div>
+  <div id="foot"><span id="ticker"></span><span class="sp"></span><span id="people"></span></div>
+</div>
+
+<div class="over" id="tvOver">
+  <div id="tvClock"></div>
+  <div class="kicker" id="tvKicker">Commercial break trivia</div>
+  <div id="tvQ"></div>
+  <div id="tvA"></div>
+  <div id="tvMeta"></div>
+  <div id="tvKid"></div>
+</div>
+<div class="over" id="rvOver">
+  <div class="kicker">🚩 Flagged by <span id="rvBy"></span></div>
+  <div id="rvTitle">UNDER REVIEW</div>
+  <div id="rvBars"><div id="rvS"><b>0</b>STANDS</div><div id="rvO"><b>0</b>OVERTURNED</div></div>
+  <div id="rvMeta"></div>
+</div>
+<div class="over" id="celebOver">
+  <div class="kicker" id="celebK">BYU</div>
+  <div id="celebT">TOUCHDOWN</div>
+  <div id="celebL"></div>
+</div>
+<div class="over" id="endOver">
+  <div class="kicker" id="endK">Final</div>
+  <div id="celebT2" style="font-size:80px;font-weight:900"></div>
+  <div id="awards"></div>
+</div>
+
+<div id="camWrap">
+  <canvas id="camCv"></canvas>
+  <video id="replayV" muted playsinline class="hide"></video>
+  <div class="scan"></div>
+  <div class="frame"></div>
+  <div id="camTag"><i></i>COUGAR CAM</div>
+  <div id="camCap"></div>
+  <div id="camSub"></div>
+</div>
+
+<div id="help" class="hide">
+  <b>Keys</b><br>
+  <kbd>F</kbd> full screen · <kbd>H</kbd> this help<br>
+  <kbd>C</kbd> Cougar Cam now · <kbd>R</kbd> pretend the room just went off<br>
+  <kbd>T</kbd> trivia round now · <kbd>V</kbd> play the reaction reel<br>
+  <kbd>[</kbd> <kbd>]</kbd> TV delay -1 s / +1 s<br>
+  <kbd>P</kbd> pause a rehearsal · <kbd>→</kbd> skip it 30 s<br>
+  <kbd>S</kbd> save every reaction clip to this laptop
+</div>
+<div id="status"></div>
+
+<script src="net.js"></script>
+<script src="qr.js"></script>
+<script type="module">
+import {createHost} from './host.js';
+import {liveSource, replaySource, scoreboardUrl} from './feed.js';
+import {awards, playLine, DRIVE_LABEL} from './game.js';
+import {createCam, listClips, clearClips} from './cam.js';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const Q = new URLSearchParams(location.search);
+const isLocal = GDNet.isLocal();
+
+/* ---------- setup: which game ---------- */
+const MAIN = {league: 'cfb', event: '401856849', team: '252', label: 'BYU at Utah', replay: false};
+let choice = null, speed = +(Q.get('speed') || 1);
+
+function choose(c){
+  choice = c;
+  $('chosen').classList.remove('hide');
+  $('startBtn').classList.remove('hide');
+  $('chosen').innerHTML = '<b>' + esc(c.label) + '</b>' + (c.replay ? ' · rehearsal at ' + speed + '×' : '') +
+    '<div class="note">The room roots for <b>' + esc(c.teamName || 'BYU') + '</b>.</div>';
+}
+$('pickMain').onclick = () => choose(Object.assign({}, MAIN, {teamName: 'BYU'}));
+document.querySelectorAll('#replays button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#replays button').forEach(x => x.classList.toggle('sel', x === b));
+  choose({league: 'cfb', event: b.dataset.ev, team: b.dataset.team, label: b.textContent, replay: true, teamName: b.dataset.team === '252' ? 'BYU' : 'Utah'});
+});
+document.querySelectorAll('#speeds button').forEach(b => b.onclick = () => {
+  speed = +b.dataset.s;
+  document.querySelectorAll('#speeds button').forEach(x => x.classList.toggle('sel', x === b));
+  if(choice) choose(choice);
+});
+
+/* today's games, college and NFL, live or about to start */
+function ymd(d){ return d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+async function listGames(){
+  const out = [];
+  const days = [ymd(new Date()), ymd(new Date(Date.now() + 86400e3))];
+  for(const lg of ['cfb', 'nfl']) for(const day of days){
+    try {
+      const j = await (await fetch(scoreboardUrl(lg, day))).json();
+      (j.events || []).forEach(e => {
+        const c = e.competitions[0], st = c.status.type;
+        if(st.state === 'post') return;
+        const nets = (c.broadcasts || []).flatMap(b => b.names || []);
+        out.push({league: lg, event: e.id, label: e.shortName, when: new Date(e.date), live: st.state === 'in', detail: st.shortDetail, nets,
+          teams: c.competitors.map(t => ({id: String(t.id), n: t.team.shortDisplayName || t.team.abbreviation}))});
+      });
+    } catch(e){}
+  }
+  const seen = new Set();
+  return out.filter(g => !seen.has(g.event) && seen.add(g.event)).sort((a, b) => (b.live - a.live) || (a.when - b.when)).slice(0, 40);
+}
+listGames().then(gs => {
+  const box = $('games');
+  if(!gs.length){ box.innerHTML = '<span class="note">No games found for today or tomorrow.</span>'; return; }
+  box.innerHTML = '';
+  gs.forEach(g => {
+    const b = document.createElement('button');
+    const ota = g.nets.some(n => /^(ABC|CBS|NBC|FOX|Fox|CW|The CW)$/.test(n));
+    b.innerHTML = (g.live ? '🔴 ' : '') + esc(g.label) + ' <span style="font-weight:400;color:var(--dim)">' +
+      esc(g.live ? g.detail : g.when.toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'})) + ' · ' + esc(g.nets.join('/') || '?') + (ota ? ' 📡' : '') + '</span>';
+    b.onclick = () => {
+      document.querySelectorAll('#games button').forEach(x => x.classList.toggle('sel', x === b));
+      const tp = $('teamPick');
+      tp.classList.remove('hide');
+      tp.innerHTML = '<span class="note" style="width:100%">Which team is the room rooting for?</span>';
+      g.teams.forEach(t => {
+        const tb = document.createElement('button');
+        tb.textContent = t.n;
+        tb.onclick = () => { tp.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === tb)); choose({league: g.league, event: g.event, team: t.id, label: g.label, replay: false, teamName: t.n}); };
+        tp.appendChild(tb);
+      });
+    };
+    box.appendChild(b);
+  });
+});
+
+$('startBtn').onclick = () => start(choice);
+
+/* ---------- running ---------- */
+let host = null, cam = null, view = null, room = null;
+function start(c){
+  $('setup').classList.add('hide');
+  const src = c.replay ? replaySource(c.league, c.event, {speed, preroll: +(Q.get('preroll') || 120)}) : liveSource(c.league, c.event);
+  host = createHost({cfg: {league: c.league, event: c.event, team: c.team, seed: (Math.random() * 2 ** 31) | 0},
+    source: src, fresh: Q.get('fresh') === '1',
+    onView: (v, S, now) => { view = v; render(v, S, now); },
+    onRoom: r => { room = r; renderRoom(r); },
+  });
+  window.GD = {host, cam: null, choice: c};
+  if($('useCam').checked && Q.get('nocam') !== '1') startCam();
+  document.title = 'Game Day · ' + c.label;
+}
+async function startCam(){
+  cam = createCam({now: () => host.now()});
+  window.GD.cam = cam;
+  await cam.start();
+  cam.on('clip', clip => { queueReplay(clip); });
+  status();
+}
+
+/* ---------- the room code ---------- */
+let qrFor = '';
+function joinUrl(){
+  const base = location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+  return base + 'play.html' + (isLocal ? '?local=1' : '') + '#' + (room && room.code || '');
+}
+function drawQr(cv, text){
+  const m = qrMatrix(text, 'M'), n = m.length, g = cv.getContext('2d');
+  const s = Math.floor(cv.width / (n + 2));
+  g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = '#000';
+  const o = Math.floor((cv.width - s * n) / 2);
+  for(let y = 0; y < n; y++) for(let x = 0; x < n; x++) if(m[y][x]) g.fillRect(o + x * s, o + y * s, s, s);
+}
+function renderRoom(r){
+  $('code').textContent = r.code || '····';
+  if(r.code && qrFor !== r.code){ qrFor = r.code; drawQr($('qr'), joinUrl()); $('joinUrl').textContent = joinUrl().replace(/^https?:\/\//, ''); }
+  if(!r.code) $('joinUrl').textContent = r.status || '';
+  const on = r.people.filter(p => p.on).length;
+  $('people').textContent = on + ' phone' + (on === 1 ? '' : 's') + ' connected';
+  const fd = $('feedDot');
+  fd.className = r.feed === true ? 'ok' : r.feed === false ? 'down' : '';
+  fd.querySelector('span').textContent = r.feed === false ? 'feed down - retrying' : r.source === 'replay' ? 'rehearsal feed' : 'ESPN feed';
+}
+
+/* ---------- the board ---------- */
+let lastLog = 0, lastTv = null, lastRv = null, celebUntil = 0, endShown = false;
+function render(v, S, now){
+  // score
+  if(v.score){
+    $('usN').textContent = v.score.us.abbr; $('usS').textContent = v.score.us.s; $('usSw').style.background = v.score.us.c;
+    $('themN').textContent = v.score.them.abbr || ''; $('themS').textContent = v.score.them.s; $('themSw').style.background = v.score.them.c;
+    $('detail').textContent = v.score.state === 'pre' ? 'Kickoff soon' : v.score.state === 'post' ? 'Final' : (v.score.detail ? v.score.detail + ' · from the feed' : '');
+  }
+  // the room
+  $('rocN').textContent = v.rocN ? v.roc + '%' : '-';
+  $('rocF').style.width = (v.rocN ? v.roc : 0) + '%';
+  const sp = v.split, tot = sp.run + sp.pass;
+  $('splitBox').innerHTML = tot ? '<div class="split"><div class="run" style="flex-grow:' + Math.max(sp.run, 0.0001) + '">RUN ' + sp.run + '</div><div class="pass" style="flex-grow:' + Math.max(sp.pass, 0.0001) + '">PASS ' + sp.pass + '</div></div>' +
+    (sp.big ? '<div class="note">🔥 ' + sp.big + ' calling a big play</div>' : '') : '<div class="none">Call the next snap on your phone: run or pass?</div>';
+  const lc = v.lastCall;
+  if(lc && lc.kind && (lc.kind === 'run' || lc.kind === 'pass')){
+    const n = lc.run + lc.pass;
+    $('last').innerHTML = '<span class="ok">' + lc.kind.toUpperCase() + '</span> · ' + (n ? '<b>' + lc.right + ' of ' + n + '</b> called it' : 'nobody called it') + '<br>' + esc(lc.line);
+  } else if(v.lastPlay) $('last').innerHTML = esc(v.lastPlay.line);
+  // the drive question
+  const d = v.drive;
+  if(d){
+    $('drive').classList.remove('hide');
+    $('driveL').textContent = (d.first ? 'First drive' : (d.team ? d.team + '\'s next drive' : 'Next drive')) + ' · how does it end?';
+    $('driveO').innerHTML = ['td', 'fg', 'punt', 'turnover'].map(k => '<div><b>' + (d.tally[k] || 0) + '</b>' + DRIVE_LABEL[k] + '</div>').join('');
+  } else $('drive').classList.add('hide');
+  // kickoff
+  $('kickBox').classList.toggle('hide', !v.kick);
+  if(v.kick) $('kickNote').textContent = v.kick.taps ? v.kick.taps + ' tapped · lining up with this TV' : (v.synced ? 'Lined up: this TV is ' + (v.D / 1000).toFixed(0) + ' s behind real time.' : 'That lines the game up with this TV.');
+  // leaderboard
+  $('lbList').innerHTML = v.board.map(p => '<li class="' + (p.on ? '' : 'off') + '"><span class="r">' + p.rank + '</span><span class="n">' + esc(p.n) + (p.kid ? ' 🐾' : '') +
+    '</span><span class="f">' + (p.st >= 3 ? '🔥' + p.st : '') + '</span><span class="s">' + p.s + '</span></li>').join('') ||
+    '<li><span class="n" style="color:var(--dim);font-weight:400">Scan the code to play</span></li>';
+  // ticker: the newest thing that happened
+  const lg = v.log[v.log.length - 1];
+  if(lg) $('ticker').textContent = tickerText(lg);
+
+  // moments, most important first
+  moments(v, S, now);
+  status();
+}
+function tickerText(l){
+  if(l.k === 'score') return (l.ours ? '🎉 ' : '') + l.line;
+  if(l.k === 'drive') return l.line;
+  if(l.k === 'synced') return 'Lined up with this TV (' + (l.d / 1000).toFixed(0) + ' s behind real time, ' + l.n + ' tap' + (l.n > 1 ? 's' : '') + ')';
+  if(l.k === 'ruling') return 'Review: the call ' + (l.v === 'overturned' ? 'was OVERTURNED' : 'STANDS');
+  return '';
+}
+
+function setOver(id, on){ $(id).classList.toggle('on', !!on); }
+let celebLog = null;
+function moments(v, S, now){
+  const t = Date.now();
+  // a BYU score: celebrate once, quietly (no sound), for seven seconds
+  const sc = v.log.filter(l => l.k === 'score' && l.ours).pop();
+  if(sc && sc !== celebLog && sc.at > (celebLog ? celebLog.at : 0) && now - sc.at < 20000){
+    celebLog = sc; celebUntil = t + 7000;
+    $('celebK').textContent = (v.score && v.score.us.n) || '';
+    $('celebT').textContent = sc.td ? 'TOUCHDOWN!' : 'FIELD GOAL!';
+    $('celebL').textContent = sc.line;
+    afterCeleb = true;
+  }
+  const celeb = t < celebUntil;
+  const tv = v.tv, rv = v.review;
+  const final = v.phase === 'final';
+  setOver('celebOver', celeb && !camOn);
+  setOver('rvOver', !celeb && !camOn && rv);
+  setOver('tvOver', !celeb && !camOn && !rv && tv);
+  setOver('endOver', !celeb && !camOn && !rv && !tv && final);
+  document.body.classList.toggle('quiet', !(celeb || rv || tv || final || camOn) && v.phase === 'live');
+  if(tv) renderTrivia(tv);
+  if(rv) renderReview(rv);
+  if(final && !endShown){ endShown = true; renderEnd(v, S); }
+
+  // the camera: after a trivia round, after a celebration, now and then before the game and at halftime
+  if(lastTv && !tv) wantCam = 'round';
+  lastTv = tv;
+  if(afterCeleb && !celeb){ afterCeleb = false; wantCam = 'score'; }
+  if((v.phase === 'pre' || v.phase === 'half' || final) && t - lastCamAt > (v.phase === 'half' || final ? 60000 : 75000)) wantCam = 'idle';
+  if(wantCam && !camOn && !rv && !tv && !celeb) runCam(wantCam);
+}
+let afterCeleb = false, wantCam = null, camOn = false, lastCamAt = 0;
+
+function renderTrivia(r){
+  $('tvKicker').textContent = (r.kind === 'half' ? 'Halftime trivia' : 'Commercial break trivia') + ' · ' + (r.i + 1) + ' of ' + r.of;
+  $('tvQ').textContent = r.q;
+  $('tvA').innerHTML = r.a.map((a, i) => '<div class="' + (r.state === 'reveal' ? (i === r.c ? 'right' : 'wrong') : '') + '"><i>' + 'ABCD'[i] + '</i>' + esc(a) + '</div>').join('');
+  $('tvClock').textContent = r.state === 'ask' ? r.left : '';
+  $('tvMeta').textContent = r.state === 'reveal' ? (r.who && r.who.length ? '✅ ' + r.who.join(' · ') : 'Nobody got that one') + (r.note ? '  ·  ' + r.note : '') : r.answered + ' answered';
+  $('tvKid').textContent = r.kidQ ? '🐾 Kids: ' + r.kidQ.q + (r.kidQ.a ? ' → ' + r.kidQ.a : '') : '';
+}
+function renderReview(r){
+  $('rvBy').textContent = r.by;
+  $('rvTitle').textContent = r.state === 'done' ? (r.result === 'overturned' ? 'OVERTURNED' : r.result === 'stands' ? 'THE CALL STANDS' : 'NO REVIEW') : 'UNDER REVIEW';
+  $('rvS').innerHTML = '<b>' + r.stands + '</b>STANDS'; $('rvO').innerHTML = '<b>' + r.over + '</b>OVERTURNED';
+  $('rvS').classList.toggle('win', r.result === 'stands'); $('rvO').classList.toggle('win', r.result === 'overturned');
+  $('rvMeta').textContent = r.state === 'vote' ? 'Vote on your phone · ' + r.left + ' s' : r.state === 'wait' ? 'Votes are in. Waiting for the referee...' :
+    r.state === 'ask' ? 'The feed has not said. What did the referee say? (on your phones)' :
+    (r.who && r.who.length ? '✅ ' + r.who.join(' · ') : 'Nobody had it');
+}
+function renderEnd(v, S){
+  $('endK').textContent = 'Final';
+  const s = v.score;
+  $('celebT2').textContent = s ? s.us.abbr + ' ' + s.us.s + ' - ' + s.them.s + ' ' + s.them.abbr : '';
+  $('awards').innerHTML = awards(S).map(a => '<div><span>' + esc(a.t) + '</span><b>' + esc(a.n) + '</b>' + esc(a.v) + '</div>').join('');
+}
+
+/* ---------- Cougar Cam ---------- */
+const CAPS = ['Show us your Y! 🙌', 'Flex Cam 💪', 'Cosmo Cam 🐾', 'Rise & Shout!', 'Dance Cam 💃', 'Let\'s hear it! 📣', 'Game face 😤', 'Cougar Cam 🐆', 'Wave to the crowd! 👋', 'Big smile! 😁'];
+const shownAt = {};
+let capI = Math.floor(Math.random() * CAPS.length);
+function pickPerson(ps){
+  // somebody who has not been on lately: people are told apart by where they sit
+  const key = p => Math.round((p.x + p.w / 2) * 8);
+  return ps.slice().sort((a, b) => (shownAt[key(a)] || 0) - (shownAt[key(b)] || 0) || (b.s - a.s))
+    .map(p => { shownAt[key(p)] = Date.now(); return p; })[0];
+}
+async function runCam(why){
+  wantCam = null;
+  if(!cam || cam.status.camera !== 'on') return;
+  lastCamAt = Date.now();
+  // a reaction waiting to be shown goes first
+  if(replayQ.length && why !== 'idle-only') return playReplay(replayQ.shift());
+  const ps = cam.people();
+  if(!ps.length) return;
+  const p = pickPerson(ps);
+  camOn = true;
+  const cv = $('camCv'), g = cv.getContext('2d'), vid = cam.video;
+  cv.width = 1920; cv.height = 1080;
+  $('replayV').classList.add('hide'); cv.classList.remove('hide');
+  $('camTag').innerHTML = '<i></i>COUGAR CAM';
+  $('camCap').textContent = CAPS[capI++ % CAPS.length];
+  $('camSub').textContent = '';
+  $('camWrap').classList.add('on');
+  const W = vid.videoWidth, H = vid.videoHeight, full = {x: 0, y: 0, w: W, h: W * 9 / 16};
+  full.y = (H - full.h) / 2;
+  let target = cam.frameOf(p);
+  const t0 = performance.now(), IN = 1800, HOLD = 6500, OUT = 900;
+  await new Promise(done => {
+    (function frame(){
+      const t = performance.now() - t0;
+      // follow them a little if they move
+      const near = cam.people().filter(q => Math.abs((q.x + q.w / 2) - (p.x + p.w / 2)) < 0.12)[0];
+      if(near){ const f = cam.frameOf(near); target = {x: target.x * 0.9 + f.x * 0.1, y: target.y * 0.9 + f.y * 0.1, w: target.w * 0.9 + f.w * 0.1, h: target.h * 0.9 + f.h * 0.1}; }
+      let k = t < IN ? t / IN : 1;
+      k = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const r = {x: full.x + (target.x - full.x) * k, y: full.y + (target.y - full.y) * k, w: full.w + (target.w - full.w) * k, h: full.h + (target.h - full.h) * k};
+      g.drawImage(vid, r.x, r.y, r.w, r.h, 0, 0, cv.width, cv.height);
+      if(t > IN + HOLD) $('camWrap').classList.remove('on');
+      if(t > IN + HOLD + OUT) return done();
+      requestAnimationFrame(frame);
+    })();
+  });
+  camOn = false;
+}
+
+/* ---------- reaction replays ---------- */
+const replayQ = [];
+function queueReplay(clip){ replayQ.push(clip); if(replayQ.length > 3) replayQ.shift(); }
+function labelFor(clip){
+  // the play on the TV in the 25 s before the room went off: the one that set it off
+  const S = host.S, N = host.N;
+  if(!N) return '';
+  const cands = N.plays.filter(p => !p.badWall && ['run', 'pass', 'special', 'kickoff'].indexOf(p.kind) >= 0 &&
+    p.wall + S.D <= clip.wall + 2000 && p.wall + S.D >= clip.wall - 25000);
+  const best = cands.sort((a, b) => (b.scoring - a.scoring) || (b.turnover - a.turnover) || (Math.abs(b.yards) - Math.abs(a.yards)))[0];
+  return best ? 'Q' + best.period + ' ' + best.clock + ' · ' + playLine(S, best) : '';
+}
+function playReplay(clip, sub){
+  return new Promise(done => {
+    camOn = true;
+    const v = $('replayV');
+    $('camCv').classList.add('hide'); v.classList.remove('hide');
+    $('camTag').innerHTML = '<i></i>INSTANT REACTION';
+    $('camCap').textContent = '';
+    $('camSub').textContent = sub || labelFor(clip) || 'The room, just now';
+    const url = URL.createObjectURL(clip.blob);
+    v.src = url; v.muted = true;
+    v.onloadeddata = () => { $('camWrap').classList.add('on'); v.play().catch(() => {}); };
+    const finish = () => { $('camWrap').classList.remove('on'); setTimeout(() => { URL.revokeObjectURL(url); camOn = false; done(); }, 900); };
+    v.onended = finish; v.onerror = finish;
+    setTimeout(finish, 20000);
+  });
+}
+async function reel(){
+  const clips = (await listClips()).sort((a, b) => b.loud - a.loud).slice(0, 8).sort((a, b) => a.real - b.real);
+  for(const c of clips){ await playReplay(c, labelFor(c)); }
+}
+
+/* ---------- status and keys ---------- */
+function status(){
+  const s = [];
+  if(host){ s.push('TV delay ' + (host.S.D / 1000).toFixed(1) + ' s' + (host.S.dTaps.length ? '' : ' (guess)')); if(host.source.kind === 'replay') s.push('rehearsal' + (host.source.paused ? ' (paused)' : '')); }
+  if(cam){ const st = cam.status; s.push('camera ' + st.camera + ', people finder ' + st.detector + ', mic ' + st.mic + ', reactions ' + st.recording); if(st.error) s.push(st.error);
+    if(st.camera === 'on') s.push(cam.people().length + ' in view'); }
+  s.push('H for keys');
+  $('status').textContent = s.join(' · ');
+}
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if(k === 'f'){ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); }
+  if(k === 'h') $('help').classList.toggle('hide');
+  if(!host) return;
+  if(k === 'c') runCam('key');
+  if(k === 'r' && cam) cam.shout();
+  if(k === 't') host.trivia();
+  if(k === 'v') reel();
+  if(k === '[') host.nudgeD(-1000);
+  if(k === ']') host.nudgeD(1000);
+  if(k === 'p' && host.source.pause) host.source.paused ? host.source.resume() : host.source.pause();
+  if(e.key === 'ArrowRight' && host.source.skip) host.source.skip(30);
+  if(k === 's') listClips().then(cs => cs.forEach((c, i) => { const a = document.createElement('a'); a.href = URL.createObjectURL(c.blob); a.download = 'gameday-' + (i + 1) + '.webm'; a.click(); }));
+});
+// halftime: the reaction reel between rounds
+setInterval(() => { if(view && view.phase === 'half' && !view.tv && !camOn && Date.now() - lastCamAt > 30000){ lastCamAt = Date.now(); reel(); } }, 5000);
+
+// straight in, for tests and for a laptop that reloads mid-game
+if(Q.get('event') || Q.get('replay')){
+  const rep = Q.get('replay');
+  choose({league: Q.get('league') || 'cfb', event: rep || Q.get('event'), team: Q.get('team') || '252', label: Q.get('label') || (rep ? 'Rehearsal' : 'Game'), replay: !!rep});
+  if(Q.get('nocam') === '1') $('useCam').checked = false;
+  if(Q.get('go') === '1') start(choice);
+} else {
+  // a reload mid-game: offer the game that was running
+  try {
+    const last = JSON.parse(localStorage.getItem('gday_last') || 'null');
+    if(last && Date.now() - last.at < 12 * 3600e3) choose(last.c);
+  } catch(e){}
+}
+$('startBtn').addEventListener('click', () => { try { localStorage.setItem('gday_last', JSON.stringify({c: choice, at: Date.now()})); } catch(e){} });
+</script>
+</body>
+</html>

@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#04102a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Game Day</title>
+<link rel="icon" href="icon.svg">
+<script>
+/* Never zoom (Night Watch's fix for Brave and "force enable zoom"): a
+   double-tap on RUN must be two calls, not a zoom. */
+(function(){
+  var opt = {passive: false};
+  function stop(e){ if(e.cancelable) e.preventDefault(); }
+  document.addEventListener('touchstart', function(e){ if(e.touches.length > 1) stop(e); }, opt);
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(function(t){ document.addEventListener(t, stop, opt); });
+  document.addEventListener('dblclick', stop, opt);
+  var meta = document.querySelector('meta[name=viewport]'), base = meta.getAttribute('content'), timer = 0;
+  function unzoom(){ meta.setAttribute('content', base.replace('maximum-scale=1,', 'maximum-scale=1.01,')); setTimeout(function(){ meta.setAttribute('content', base); }, 80); }
+  if(window.visualViewport) visualViewport.addEventListener('resize', function(){ if(visualViewport.scale > 1.02){ clearTimeout(timer); timer = setTimeout(unzoom, 250); } });
+})();
+</script>
+<style>
+:root { --bg:#04102a; --panel:#0b1f4a; --line:#21407f; --ink:#f2f6ff; --dim:#90a8d8; --royal:#0047ba; --gold:#ffd25e; --good:#5ee6a0; --bad:#ff6b7d; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 16px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
+body { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+button { font: inherit; font-weight: 800; color: var(--ink); background: var(--panel); border: 2px solid var(--line); border-radius: 16px; padding: 14px; cursor: pointer; touch-action: manipulation; }
+button:active { transform: scale(0.97); }
+button.go { background: linear-gradient(180deg, #2a7fe0, #0047ba); border-color: #7fb0ff; }
+button.sel { background: #e9f1ff; color: #06204f; border-color: #fff; }
+input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radius: 12px; border: 2px solid var(--line); background: #071634; color: var(--ink); -webkit-user-select: text; user-select: text; }
+.hide { display: none !important; }
+.wrap { max-width: 520px; margin: 0 auto; padding: 14px; }
+
+/* join */
+#joinScr { min-height: 100vh; display: flex; align-items: center; background: radial-gradient(ellipse at 50% 0%, #163a80 0%, var(--bg) 65%); }
+#joinScr h1 { font-size: 48px; margin: 0; font-weight: 900; letter-spacing: 0.05em; text-align: center; }
+#joinScr h1 span { color: #7fb2ff; }
+#joinScr .tag { text-align: center; color: var(--dim); margin: 4px 0 22px; }
+#joinScr label { display: block; color: var(--dim); font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; margin: 16px 0 6px; }
+#kidRow { display: flex; gap: 10px; }
+#kidRow button { flex: 1; }
+#joinBtn { width: 100%; font-size: 22px; margin-top: 22px; padding: 18px; }
+#codeIn { text-transform: uppercase; letter-spacing: 0.3em; text-align: center; font-weight: 800; }
+.msg { color: var(--bad); text-align: center; min-height: 1.4em; margin-top: 10px; }
+
+/* main */
+#top { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #071634; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+#top .n { font-weight: 800; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#top .s { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+#top .r { color: var(--dim); font-size: 14px; }
+#top .st { color: var(--gold); font-weight: 800; }
+#net { width: 10px; height: 10px; border-radius: 50%; background: var(--good); flex: none; }
+#net.off { background: var(--bad); }
+#score { text-align: center; color: var(--dim); font-size: 14px; padding: 6px 0 0; }
+.card { background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 14px; margin-top: 12px; }
+.card h3 { margin: 0 0 10px; font-size: 18px; }
+.card .why { color: var(--dim); font-size: 14px; margin-top: 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#kickCard { border-color: var(--gold); background: #2a2405; }
+#kickBtn { width: 100%; font-size: 30px; padding: 22px; background: var(--gold); color: #261d00; border-color: #fff3c4; }
+#rvCard { border-color: #ffe25e; }
+#snap h3 { display: flex; align-items: baseline; justify-content: space-between; }
+#snap h3 small { color: var(--dim); font-weight: 400; font-size: 13px; }
+#callRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+#callRow button { font-size: 30px; padding: 30px 8px; border-radius: 22px; }
+#callRow button span { display: block; font-size: 15px; font-weight: 600; margin-top: 4px; opacity: 0.8; }
+#bigBtn { width: 100%; margin-top: 10px; font-size: 16px; padding: 10px; background: #071634; }
+#bigBtn.sel { background: #5a2b00; color: #ffd9a8; border-color: #ff9a3c; }
+#lockMsg { text-align: center; color: var(--gold); font-weight: 700; min-height: 1.4em; margin-top: 10px; }
+#tickets { margin-top: 12px; }
+.tk { display: flex; gap: 10px; align-items: flex-start; padding: 9px 4px; border-bottom: 1px solid #16306a; font-size: 14px; }
+.tk .ic { font-size: 18px; width: 24px; text-align: center; }
+.tk .tx { flex: 1; color: #cfdcf7; }
+.tk .tx b { color: var(--ink); }
+.tk .p { font-weight: 900; color: var(--good); }
+#driveBtns button { font-size: 16px; padding: 14px 6px; }
+#foot { display: flex; gap: 10px; margin: 16px 0 26px; }
+#foot button { flex: 1; font-size: 15px; padding: 12px 6px; background: #071634; }
+#foot button.arm { background: #5a4500; border-color: var(--gold); }
+#toast { position: fixed; left: 12px; right: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 30; padding: 16px; border-radius: 16px; font-size: 18px; font-weight: 800; text-align: center; transform: translateY(160%); transition: transform 0.35s; box-shadow: 0 10px 30px #000a; }
+#toast.on { transform: none; }
+#toast.right { background: #0f6b45; } #toast.wrong { background: #3a1820; } #toast.none { background: #1c2c55; }
+#top3 { color: var(--dim); font-size: 13px; text-align: center; margin-top: 12px; }
+
+/* trivia takes over the phone */
+#tvScr { position: fixed; inset: 0; z-index: 20; background: radial-gradient(ellipse at 50% 0%, #163a80 0%, var(--bg) 70%); overflow-y: auto; padding: calc(16px + env(safe-area-inset-top)) 16px 24px; }
+#tvScr .k { color: #9cc1ff; letter-spacing: 0.18em; text-transform: uppercase; font-size: 12px; display: flex; justify-content: space-between; }
+#tvScr .k b { color: var(--gold); font-size: 22px; letter-spacing: 0; }
+#tvQ { font-size: 24px; font-weight: 800; margin: 12px 0 18px; line-height: 1.25; }
+#tvA { display: grid; gap: 10px; }
+#tvA button { text-align: left; font-size: 19px; padding: 16px; display: flex; gap: 12px; align-items: center; }
+#tvA button i { font-style: normal; width: 34px; height: 34px; border-radius: 50%; background: #1a3f86; display: flex; align-items: center; justify-content: center; flex: none; }
+#tvA button.mine { background: #e9f1ff; color: #06204f; }
+#tvA button.right { background: #0f6b45; color: #fff; border-color: var(--good); }
+#tvA button.wrong { opacity: 0.4; }
+#tvRes { text-align: center; font-size: 22px; font-weight: 900; margin-top: 18px; min-height: 1.4em; }
+
+/* kids: bigger, simpler */
+body.kid #callRow button { font-size: 40px; padding: 40px 8px; }
+body.kid #bigBtn, body.kid #foot { display: none; }
+body.kid #tvA button { font-size: 24px; padding: 20px; }
+</style>
+</head>
+<body>
+
+<div id="joinScr">
+  <div class="wrap" style="width:100%">
+    <h1>GAME <span>DAY</span></h1>
+    <div class="tag">Call the plays. Win the room.</div>
+    <label>Your name</label>
+    <input id="nameIn" maxlength="14" autocomplete="off" placeholder="Name">
+    <label>Who's playing?</label>
+    <div id="kidRow"><button id="grown" class="sel">Grown-up</button><button id="kid">Kid 🐾</button></div>
+    <label id="codeL">Room code</label>
+    <input id="codeIn" maxlength="4" autocomplete="off" placeholder="ABCD">
+    <button class="go" id="joinBtn">Join</button>
+    <div class="msg" id="joinMsg"></div>
+  </div>
+</div>
+
+<div id="mainScr" class="hide">
+  <div id="top"><span id="net"></span><span class="n" id="meN"></span><span class="st" id="meSt"></span><span class="r" id="meR"></span><span class="s" id="meS">0</span></div>
+  <div class="wrap">
+    <div id="score"></div>
+
+    <div class="card hide" id="kickCard">
+      <button id="kickBtn">🏈 KICK!</button>
+      <div class="why" id="kickWhy" style="color:#f3e2a0">Tap the moment the ball is kicked on the TV. It lines the game up with your TV.</div>
+    </div>
+
+    <div class="card hide" id="rvCard">
+      <h3 id="rvH">🚩 Under review!</h3>
+      <div class="grid2" id="rvBtns"><button data-v="stands">The call<br>STANDS</button><button data-v="overturned">OVER-<br>TURNED</button></div>
+      <div class="why" id="rvWhy"></div>
+    </div>
+
+    <div class="card" id="snap">
+      <h3>Next snap <small id="snapSub">call it before the snap</small></h3>
+      <div id="callRow">
+        <button data-v="run" id="runBtn">RUN<span>🏃</span></button>
+        <button data-v="pass" id="passBtn">PASS<span>🏈</span></button>
+      </div>
+      <button id="bigBtn">🔥 Big play (15+ yards)</button>
+      <div id="lockMsg"></div>
+      <div id="tickets"></div>
+    </div>
+
+    <div class="card hide" id="driveCard">
+      <h3 id="driveH">How does the next drive end?</h3>
+      <div class="grid2" id="driveBtns">
+        <button data-v="td">🏈 Touchdown</button><button data-v="fg">🥅 Field goal</button>
+        <button data-v="punt">🦶 Punt</button><button data-v="turnover">🔄 Turnover</button>
+      </div>
+      <div class="why">Locks when that drive's first play is snapped. Missed field goals and 4th-down stops count as turnovers.</div>
+    </div>
+
+    <div id="top3"></div>
+    <div id="foot">
+      <button id="flagBtn">🚩 Review on TV</button>
+      <button id="adBtn">📺 Commercial</button>
+    </div>
+  </div>
+</div>
+
+<div id="tvScr" class="hide">
+  <div class="k"><span id="tvK">Trivia</span><b id="tvClock"></b></div>
+  <div id="tvQ"></div>
+  <div id="tvA"></div>
+  <div id="tvRes"></div>
+</div>
+
+<div id="toast"></div>
+
+<script src="net.js"></script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const isLocal = GDNet.isLocal();
+function box(){ return isLocal ? sessionStorage : localStorage; }
+function store(k, v){ try { box().setItem(k, v); } catch(e){} }
+function recall(k){ try { return box().getItem(k); } catch(e){ return null; } }
+let dev = recall('gday_dev');
+if(!dev){ dev = 'd' + Math.random().toString(36).slice(2, 12); store('gday_dev', dev); }
+
+let kid = recall('gday_kid') === '1';
+$('nameIn').value = recall('gday_name') || '';
+const hashCode = (location.hash.slice(1) || new URLSearchParams(location.search).get('r') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+$('codeIn').value = hashCode || recall('gday_code') || '';
+if(hashCode){ $('codeIn').classList.add('hide'); $('codeL').classList.add('hide'); }
+function setKid(v){ kid = v; $('kid').classList.toggle('sel', v); $('grown').classList.toggle('sel', !v); document.body.classList.toggle('kid', v); }
+setKid(kid);
+$('kid').onclick = () => setKid(true);
+$('grown').onclick = () => setKid(false);
+
+/* ---------- connection ---------- */
+let conn = null, handle = null, joined = false, retries = 0, retryTimer = 0, code = '';
+function tx(m){ if(conn){ try { conn.send(m); } catch(e){} } }
+function joinNow(){
+  const name = $('nameIn').value.trim();
+  code = $('codeIn').value.trim().toUpperCase();
+  if(!name){ $('joinMsg').textContent = 'Type your name.'; return; }
+  if(code.length !== 4){ $('joinMsg').textContent = 'Type the 4-letter code from the TV.'; return; }
+  store('gday_name', name); store('gday_code', code); store('gday_kid', kid ? '1' : '0');
+  joined = true;
+  $('joinMsg').textContent = 'Joining...';
+  keepAwake();
+  connect();
+}
+$('joinBtn').onclick = joinNow;
+function connect(){
+  if(handle){ try { handle.destroy(); } catch(e){} handle = null; }
+  conn = null; netState(false);
+  handle = GDNet.join(code, {
+    timeout: 15000,
+    open: c => {
+      conn = c; retries = 0; netState(true);
+      c.on('data', onData);
+      c.on('close', () => { if(conn === c){ conn = null; netState(false); later(); } });
+      tx({t: 'hello', dev, name: recall('gday_name'), kid});
+      $('joinScr').classList.add('hide'); $('mainScr').classList.remove('hide');
+    },
+    error: type => {
+      if(!$('mainScr').classList.contains('hide')) return later();
+      $('joinMsg').textContent = type === 'peer-unavailable' ? 'No game with that code. Check the TV.' : 'Could not connect (' + type + '). Trying again...';
+      later();
+    }
+  });
+}
+function later(){
+  clearTimeout(retryTimer);
+  const wait = Math.min(15000, 1000 * Math.pow(1.6, retries++));
+  retryTimer = setTimeout(() => { if(joined && !conn) connect(); }, wait);
+}
+function netState(on){ $('net').classList.toggle('off', !on); }
+setInterval(() => tx({t: 'ping'}), 2500);
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible'){ keepAwake(); if(joined && !conn){ retries = 0; connect(); } }
+});
+let wake = null;
+async function keepAwake(){ try { if(navigator.wakeLock && !wake){ wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } } catch(e){} }
+if(hashCode && recall('gday_name') && recall('gday_code') === hashCode) joinNow();   // a reload: straight back in
+
+/* ---------- what the TV says ---------- */
+let V = null, seenTickets = null, lastToast = 0;
+function onData(m){
+  if(!m || typeof m !== 'object') return;
+  if(m.t === 'st'){ V = m; render(); }
+}
+function buzz(p){ try { navigator.vibrate && navigator.vibrate(p); } catch(e){} }
+function toast(text, cls){
+  const t = $('toast');
+  t.className = 'on ' + cls; t.innerHTML = text;
+  clearTimeout(t._h); t._h = setTimeout(() => { t.className = cls; }, 3200);
+}
+const LABEL = {run: 'RUN', pass: 'PASS', td: 'Touchdown', fg: 'Field goal', punt: 'Punt', turnover: 'Turnover'};
+
+function render(){
+  const v = V;
+  document.body.classList.toggle('kid', !!v.kid);
+  $('meN').textContent = v.me.n;
+  $('meS').textContent = v.me.s;
+  $('meR').textContent = v.me.rank ? '#' + v.me.rank + ' of ' + v.me.of : '';
+  $('meSt').textContent = v.me.st >= 2 ? '🔥' + v.me.st : '';
+  $('score').textContent = v.score ? v.score.us.abbr + ' ' + v.score.us.s + ' - ' + v.score.them.s + ' ' + v.score.them.abbr + (v.feed === 'down' ? ' · feed down, retrying' : '') : '';
+  $('top3').textContent = v.top && v.top.length ? 'Top: ' + v.top.map((t, i) => (i + 1) + '. ' + t.n + ' ' + t.s).join('  ') : '';
+
+  // kickoff
+  $('kickCard').classList.toggle('hide', !v.kick);
+  if(v.kick){
+    $('kickBtn').textContent = v.kick.tapped ? '✓ Got it' : '🏈 KICK!';
+    $('kickWhy').textContent = v.kick.why === 'start' ? 'Tap the moment the opening kickoff is kicked on the TV. It lines the game up with your TV.' :
+      'Tap the moment the ball is kicked on the TV.';
+  }
+  // review
+  const r = v.review;
+  $('rvCard').classList.toggle('hide', !r);
+  if(r){
+    const btns = $('rvBtns');
+    if(r.state === 'vote'){
+      $('rvH').textContent = '🚩 Under review! What will the ref say?';
+      btns.innerHTML = '<button data-v="stands">The call<br>STANDS</button><button data-v="overturned">OVER-<br>TURNED</button>';
+      btns.querySelectorAll('button').forEach(b => { b.classList.toggle('sel', b.dataset.v === r.mine); b.onclick = () => { tx({t: 'rvote', v: b.dataset.v}); buzz(15); }; });
+      $('rvWhy').textContent = 'Voting closes in ' + r.left + ' s · flagged by ' + r.by;
+    } else if(r.state === 'wait'){
+      $('rvH').textContent = '🚩 Votes are in';
+      btns.innerHTML = '';
+      $('rvWhy').textContent = 'You said ' + (r.mine ? (r.mine === 'stands' ? 'it STANDS' : 'OVERTURNED') : 'nothing') + '. Waiting for the referee...';
+    } else if(r.state === 'ask'){
+      $('rvH').textContent = 'What did the referee say?';
+      btns.innerHTML = '<button data-v="stands">It STANDS</button><button data-v="overturned">OVERTURNED</button><button data-v="none" style="grid-column:1/3">There was no review</button>';
+      btns.querySelectorAll('button').forEach(b => b.onclick = () => tx({t: 'ref', v: b.dataset.v}));
+      $('rvWhy').textContent = 'The feed has not said. First answer counts.';
+    } else {
+      $('rvH').textContent = r.result === 'none' ? 'No review after all' : (r.result === 'overturned' ? 'OVERTURNED' : 'The call STANDS') + (r.right === true ? ' · ✅ +40' : r.right === false ? ' · ❌' : '');
+      btns.innerHTML = ''; $('rvWhy').textContent = '';
+    }
+  }
+  // the snap
+  $('snapSub').textContent = v.phase === 'final' ? 'game over' : 'call it before the snap';
+  const tk = v.tickets.slice().reverse();
+  let html = '';
+  if(v.pend) html += '<div class="tk"><span class="ic">⏳</span><span class="tx"><b>' + LABEL[v.pend.v] + (v.pend.big ? ' 🔥' : '') + '</b> - counts for the next snap</span></div>';
+  tk.forEach(t => {
+    const ic = t.res === 'right' ? '✅' : t.res === 'wrong' ? '❌' : '➖';
+    const what = t.drive ? 'Drive: ' + LABEL[t.v] : LABEL[t.v] + (t.big ? ' 🔥' : '');
+    html += '<div class="tk"><span class="ic">' + ic + '</span><span class="tx"><b>' + esc(what) + '</b> · ' + esc(t.line || '') + '</span>' + (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div>';
+  });
+  $('tickets').innerHTML = html || '<div class="tk"><span class="tx">Tap RUN or PASS before each snap. You\'ll see if you were right about 30 seconds later, once the play reaches the feed.</span></div>';
+  // a new result: say so
+  const key = tk.map(t => t.at + t.line).join('|');
+  if(seenTickets !== null && tk[0] && key !== seenTickets && !seenTickets.startsWith(tk[0].at + tk[0].line)){
+    const t = tk[0];
+    if(t.res === 'right'){ toast('✅ ' + LABEL[t.v] + '! +' + t.pts + (t.few ? ' · only ' + t.few + ' called it' : '') + (t.streak >= 3 ? ' · 🔥' + t.streak + ' in a row' : ''), 'right'); buzz([30, 50, 30]); }
+    else if(t.res === 'wrong') { toast('❌ ' + (t.drive ? 'Drive' : 'It was the other one') + (t.bigHit ? ' · but 🔥 big play +20' : ''), 'wrong'); buzz(20); }
+    else toast('➖ ' + esc(t.line || 'No call on that one'), 'none');
+  }
+  seenTickets = key;
+  // the drive
+  const d = v.drive;
+  $('driveCard').classList.toggle('hide', !d);
+  if(d){
+    $('driveH').textContent = d.first ? 'How does the first drive end?' : 'How does ' + (d.team ? d.team + '\'s' : 'the') + ' next drive end?';
+    $('driveBtns').querySelectorAll('button').forEach(b => b.classList.toggle('sel', b.dataset.v === d.mine));
+  }
+  // trivia
+  renderTv(v.tv);
+}
+
+/* the snap: RUN or PASS, stamped by the TV the moment it arrives */
+let big = false, lockT = 0;
+document.querySelectorAll('#callRow button').forEach(b => b.onclick = () => {
+  tx({t: 'call', v: b.dataset.v, big});
+  buzz(15);
+  $('runBtn').classList.toggle('sel', b.dataset.v === 'run'); $('passBtn').classList.toggle('sel', b.dataset.v === 'pass');
+  $('lockMsg').textContent = 'Locked: ' + LABEL[b.dataset.v] + (big ? ' 🔥' : '') + ' for the next snap';
+  clearTimeout(lockT);
+  lockT = setTimeout(() => { $('runBtn').classList.remove('sel'); $('passBtn').classList.remove('sel'); $('lockMsg').textContent = ''; big = false; $('bigBtn').classList.remove('sel'); }, 7000);
+});
+$('bigBtn').onclick = () => { big = !big; $('bigBtn').classList.toggle('sel', big); };
+document.querySelectorAll('#driveBtns button').forEach(b => b.onclick = () => { tx({t: 'drive', v: b.dataset.v}); buzz(15); });
+$('kickBtn').onclick = () => { tx({t: 'kick'}); buzz(40); };
+
+/* the two buttons a kid could set off by accident: tap twice */
+function twoTap(id, first, again, send){
+  const b = $(id);
+  let armed = 0;
+  b.onclick = () => {
+    if(Date.now() - armed < 3000){ armed = 0; b.classList.remove('arm'); b.textContent = first; send(); buzz(30); return; }
+    armed = Date.now(); b.classList.add('arm'); b.textContent = again;
+    setTimeout(() => { if(armed && Date.now() - armed >= 3000){ armed = 0; b.classList.remove('arm'); b.textContent = first; } }, 3100);
+  };
+}
+twoTap('flagBtn', '🚩 Review on TV', 'Tap again: a review?', () => tx({t: 'flag'}));
+twoTap('adBtn', '📺 Commercial', 'Tap again: trivia now?', () => tx({t: 'ad'}));
+
+/* trivia */
+let tvKey = '';
+function renderTv(r){
+  $('tvScr').classList.toggle('hide', !r);
+  if(!r){ tvKey = ''; return; }
+  $('tvK').textContent = (r.kind === 'half' ? 'Halftime trivia' : 'Trivia') + ' · ' + (r.i + 1) + ' of ' + r.of;
+  $('tvClock').textContent = r.state === 'ask' ? r.left : '';
+  const key = r.n + ':' + r.i + ':' + r.state + ':' + r.mine;
+  if(key === tvKey) return;
+  tvKey = key;
+  $('tvQ').textContent = r.q;
+  $('tvA').innerHTML = r.a.map((a, i) => '<button data-i="' + i + '" class="' +
+    (r.state === 'reveal' ? (i === r.c ? 'right' : i === r.mine ? 'wrong' : 'wrong') : (i === r.mine ? 'mine' : '')) + '"><i>' + 'ABCD'[i] + '</i>' + esc(a) + '</button>').join('');
+  $('tvA').querySelectorAll('button').forEach(b => b.onclick = () => {
+    if(r.state !== 'ask' || r.mine >= 0) return;
+    tx({t: 'ans', n: r.n, i: +b.dataset.i}); buzz(15);
+    b.classList.add('mine');
+  });
+  $('tvRes').textContent = r.state === 'reveal' ? (r.got ? '✅ +' + r.got : r.mine >= 0 ? '❌ Not that one' : 'Too slow!') : (r.mine >= 0 ? 'Locked in!' : '');
+  if(r.state === 'reveal' && r.got) buzz([30, 50, 30]);
+}
+</script>
+</body>
+</html>

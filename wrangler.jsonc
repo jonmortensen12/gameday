@@ -1,0 +1,29 @@
+{
+  "name": "gameday",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+
+  // Give the Worker a URL on the workers.dev subdomain. Wrangler usually
+  // turns this on for a new Worker by itself, but "no URLs enabled" means it
+  // did not (Dry Fly hit the same thing), so this says so outright rather
+  // than leaving it to a dashboard toggle a later deploy could flip back.
+  "workers_dev": true,
+
+  // Keep anything set in the dashboard when a push redeploys. Secrets
+  // survive a deploy anyway; this also covers a value entered as a plain
+  // variable by mistake, which a deploy would otherwise wipe.
+  "keep_vars": true,
+
+  // Only web/ is uploaded - the check scripts and the notes beside it stay
+  // in the repo and off the internet.
+  "assets": {
+    "directory": "web",
+    "binding": "ASSETS",
+    // Only these paths reach worker.js; everything else is a plain file.
+    // /relay is not a file, so it has to be listed or it would 404.
+    "run_worker_first": ["/relay"]
+  }
+
+  // Secrets, set in the dashboard and never written here:
+  //   TURN_KEY_ID, TURN_KEY_API_TOKEN - the relay (see worker.js). Optional.
+}
