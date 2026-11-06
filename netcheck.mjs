@@ -90,10 +90,12 @@ try {
         sawTvOnPhone = true;
         // once, somebody has had enough trivia: ⏭, twice
         if(skipped === null && p === phones[2].p && !huddle){
-          const n = await tv.evaluate(() => GD.host.S.tv && GD.host.S.tv.n);
+          // at 60x a round is over in a second: hold the game still while the thumb moves
+          const n = await tv.evaluate(() => { GD.host.source.pause(); return GD.host.S.tv && GD.host.S.tv.state !== 'done' ? GD.host.S.tv.n : null; });
+          if(n == null){ await tv.evaluate(() => GD.host.source.resume()); continue; }
           await tap(p, '#tvSkip'); await tap(p, '#tvSkip');
           await sleep(800);
-          skipped = await tv.evaluate(n => !!(GD.host.S.tv && GD.host.S.tv.n === n && GD.host.S.tv.state === 'done' && GD.host.S.tv.skipped), n);
+          skipped = await tv.evaluate(n => { const r = GD.host.S.tv; GD.host.source.resume(); return !!(r && r.n === n && r.state === 'done' && r.skipped); }, n);
           continue;
         }
         const n = await p.$$eval('#tvA button:not(.mine)', b => b.length);
@@ -215,6 +217,16 @@ try {
   const clips = await tv.evaluate(async () => (await (await import('./cam.js')).listClips()).map(c => ({size: c.blob.size, pre: c.pre})));
   ok(clips.length >= 1 && clips[0].size > 20000, 'a reaction clip was saved: ' + (clips[0] ? Math.round(clips[0].size / 1024) + ' KB, ' + clips[0].pre.toFixed(1) + ' s before the shout' : 'none'));
   ok(clips.length && clips[0].pre >= 7.9, 'it starts at least 8 s before the shout');
+
+  // J: the jumbotron's moments off - a plain scoreboard, camera and microphone off - and back on
+  await tv.keyboard.press('j');
+  await sleep(800);
+  const off = await tv.evaluate(() => ({plain: document.body.classList.contains('plain'), cam: !!GD.cam, chip: document.getElementById('showChip').textContent,
+    overs: [...document.querySelectorAll('.over, #camWrap')].every(e => getComputedStyle(e).display === 'none')}));
+  ok(off.plain && !off.cam && off.overs && /off/.test(off.chip), 'J turns the jumbotron moments off: nothing full-screen, camera stopped (' + off.chip + ')');
+  await tv.keyboard.press('j');
+  await tv.waitForFunction(() => GD.cam && GD.cam.status.camera === 'on', null, {timeout: 15000}).catch(() => {});
+  ok(await tv.evaluate(() => !document.body.classList.contains('plain') && !!GD.cam && GD.cam.status.camera === 'on'), 'and J again turns them back on, camera and all');
 
   console.log('the jumbotron reloads mid-game');
   {

@@ -144,6 +144,15 @@ the drives-only mode.
 
 ## The jumbotron
 
+**Jumbotron moments can be switched off**: the setup screen's checkbox,
+the 📺 button at the bottom of the board, or `J` (kept in localStorage).
+Off, the laptop is a plain scoreboard with the join code - no full-screen
+trivia, reviews, touchdowns or awards, no Cougar Cam or replays, and the
+camera and microphone are stopped. The page must stay open either way: it
+hosts the room, polls the feed and keeps the scores. Trivia still runs on
+the phones.
+
+
 Dim and still while the game is on (`body.quiet`); full brightness for
 trivia, reviews, a BYU score (7 s, silent), the Cougar Cam and the final
 awards. **It makes no sound at all.**

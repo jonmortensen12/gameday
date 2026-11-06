@@ -131,6 +131,7 @@ body.drives #drive .opts b { font-size: 64px; }
 #camTag i { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #ff3b4e; margin-right: 12px; vertical-align: middle; }
 #camCap { position: absolute; bottom: 60px; left: 0; right: 0; text-align: center; font-size: 64px; font-weight: 900; text-shadow: 0 4px 18px #000; }
 #camSub { position: absolute; bottom: 26px; left: 0; right: 0; text-align: center; font-size: 22px; color: #dfe9ff; text-shadow: 0 2px 8px #000; }
+body.plain .over, body.plain #camWrap { display: none !important; }
 #status { position: fixed; right: 12px; bottom: 8px; z-index: 40; font-size: 12px; color: #6f86b6; }
 #help { position: fixed; inset: auto 20px 40px auto; z-index: 45; background: #071634f0; border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; font-size: 15px; line-height: 1.7; }
 #help kbd { background: #1a3366; border-radius: 5px; padding: 1px 7px; font: inherit; font-weight: 700; }
@@ -163,6 +164,8 @@ body.drives #drive .opts b { font-size: 64px; }
     <div class="note" style="font-size:16px">Nobody has to guess anything until someone asks. On any phone: <b>📣 Call the next play</b> gives everyone 30 s to call run or pass, and <b>🏈 New drive</b> gives everyone 2 minutes to guess how the next drive goes. Whoever asked can <b>lock everyone's guesses</b> at the snap. If nobody starts a new drive, ESPN does when it reports the ball changing hands.</div>
 
     <h2>The room</h2>
+    <label><input type="checkbox" id="useShow" checked> Jumbotron moments: full-screen trivia, reviews and touchdowns on this screen, the Cougar Cam and reaction replays</label>
+    <div class="note">Off: this screen is just a quiet scoreboard with the join code, and the phones do everything. Switch any time with <b>J</b> or the button at the bottom of the board. Keep this page open either way - it runs the room.</div>
     <label><input type="checkbox" id="useCam" checked> Use this laptop's camera and microphone (Cougar Cam, reaction replays)</label>
     <div class="note">Put the laptop beside the TV, facing the couch. Nothing it records leaves this laptop.</div>
 
@@ -213,7 +216,7 @@ body.drives #drive .opts b { font-size: 64px; }
     <div class="lbl">Leaderboard</div>
     <ol id="lbList"></ol>
   </div>
-  <div id="foot"><span id="ticker"></span><span class="sp"></span><button id="askChip" title="A">📣 Call a play</button><button id="driveChip" title="D">🏈 New drive</button><button id="flagChip" title="X">🚩 Review</button><span id="people"></span></div>
+  <div id="foot"><span id="ticker"></span><span class="sp"></span><button id="askChip" title="A">📣 Call a play</button><button id="driveChip" title="D">🏈 New drive</button><button id="flagChip" title="X">🚩 Review</button><button id="showChip" title="J">📺 Jumbotron: on</button><span id="people"></span></div>
 </div>
 
 <div class="over" id="tvOver">
@@ -255,6 +258,7 @@ body.drives #drive .opts b { font-size: 64px; }
 <div id="help" class="hide">
   <b>Keys</b><br>
   <kbd>F</kbd> full screen · <kbd>H</kbd> this help<br>
+  <kbd>J</kbd> jumbotron moments on / off<br>
   <kbd>C</kbd> Cougar Cam now · <kbd>R</kbd> pretend the room just went off<br>
   <kbd>T</kbd> trivia round now · <kbd>E</kbd> end it · <kbd>V</kbd> play the reaction reel<br>
   <kbd>A</kbd> call for a play · <kbd>D</kbd> start drive guesses<br>
@@ -362,8 +366,30 @@ function start(c){
   $('askChip').onclick = () => host.push('play');
   $('driveChip').onclick = () => host.push('drive');
   $('flagChip').onclick = () => host.flag();
-  if($('useCam').checked && Q.get('nocam') !== '1') startCam();
+  $('showChip').onclick = () => setShow(!show);
+  setShow(show);
   document.title = 'Game Day · ' + c.label;
+}
+/* ---------- the jumbotron's moments, on or off ---------- */
+let show = true;
+try { show = localStorage.getItem('gday_show') !== '0'; } catch(e){}
+$('useShow').checked = show;
+$('useShow').onchange = () => setShow($('useShow').checked);
+function setShow(on){
+  show = !!on;
+  try { localStorage.setItem('gday_show', show ? '1' : '0'); } catch(e){}
+  $('useShow').checked = show;
+  document.body.classList.toggle('plain', !show);
+  $('showChip').textContent = '📺 Jumbotron: ' + (show ? 'on' : 'off');
+  if(!host) return;
+  if(!show){
+    // the camera and microphone go off with it
+    ['celebOver', 'rvOver', 'tvOver', 'endOver'].forEach(id => setOver(id, false));
+    $('camWrap').classList.remove('on');
+    if(cam){ cam.stop(); cam = null; window.GD.cam = null; }
+    camOn = false; wantCam = null; replayQ.length = 0;
+  } else if($('useCam').checked && !cam && Q.get('nocam') !== '1') startCam();
+  status();
 }
 async function startCam(){
   cam = createCam({now: () => host.now()});
@@ -492,6 +518,12 @@ function moments(v, S, now){
   const celeb = t < celebUntil;
   const tv = v.tv, rv = v.review;
   const final = v.phase === 'final';
+  if(!show){
+    // just the scoreboard: no overlays, no camera, nothing dims
+    document.body.classList.remove('quiet');
+    lastTv = tv; afterCeleb = false; wantCam = null;
+    return;
+  }
   setOver('celebOver', celeb && !camOn);
   setOver('rvOver', !celeb && !camOn && rv);
   setOver('tvOver', !celeb && !camOn && !rv && tv);
@@ -546,6 +578,7 @@ function pickPerson(ps){
 }
 async function runCam(why){
   wantCam = null;
+  if(!show) return;
   if(!cam || cam.status.camera !== 'on') return;
   lastCamAt = Date.now();
   // a reaction waiting to be shown goes first
@@ -612,6 +645,7 @@ function playReplay(clip, sub){
   });
 }
 async function reel(){
+  if(!show) return;
   const clips = (await listClips()).sort((a, b) => b.loud - a.loud).slice(0, 8).sort((a, b) => a.real - b.real);
   for(const c of clips){ await playReplay(c, labelFor(c)); }
 }
@@ -631,6 +665,7 @@ addEventListener('keydown', e => {
   if(k === 'h') $('help').classList.toggle('hide');
   if(!host) return;
   if(k === 'c') runCam('key');
+  if(k === 'j') setShow(!show);
   if(k === 'r' && cam) cam.shout();
   if(k === 't') host.trivia();
   if(k === 'e') host.endTrivia();
