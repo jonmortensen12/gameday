@@ -71,16 +71,20 @@ try {
   ok(await tv.evaluate(() => GD.host.roomInfo().people.filter(p => p.on).length) === 3, 'the jumbotron sees three phones');
 
   // play along until the final whistle
-  let modeTested = false, rejoinTested = false;
+  let keyTested = false, rejoinTested = false, pushes = 0, locks = 0, huddle = 0;
   let sawTrivia = false, sawTvOnPhone = false, flagged = false, sawReview = false, answered = 0, calls = 0;
   const t0 = Date.now();
-  while(Date.now() - t0 < 330000){
+  while(Date.now() - t0 < 560000){   // the huddles hold the replay, so this takes a while
     const v = await tv.evaluate(() => { const v = GD.host.S; return {phase: v.phase, tv: !!(v.tv && v.tv.state !== 'done'), rv: v.rv && v.rv.state, n: Object.keys(v.done).length}; });
     if(v.tv) sawTrivia = true;
     if(v.rv) sawReview = true;
     for(const {p} of phones){
       const vis = await p.evaluate(() => ({tv: !document.getElementById('tvScr').classList.contains('hide'),
-        kick: !document.getElementById('kickCard').classList.contains('hide'), drive: !document.getElementById('driveCard').classList.contains('hide'),
+        kick: !document.getElementById('kickCard').classList.contains('hide'),
+        drive: !document.getElementById('driveCard').classList.contains('hide') && !document.getElementById('driveCard').classList.contains('locked'),
+        play: !document.getElementById('snap').classList.contains('hide') && !document.getElementById('snap').classList.contains('locked'),
+        askPlay: !document.getElementById('askPlay').disabled, askDrive: !document.getElementById('askDrive').disabled,
+        lockPlay: !document.getElementById('lockPlay').classList.contains('hide'), lockDrive: !document.getElementById('lockDrive').classList.contains('hide'),
         rv: !document.getElementById('rvCard').classList.contains('hide'), rvBtns: document.querySelectorAll('#rvBtns button').length}));
       if(vis.tv){
         sawTvOnPhone = true;
@@ -90,21 +94,29 @@ try {
       }
       if(vis.kick && Math.random() < 0.3) await tap(p, '#kickBtn');
       if(vis.rv && vis.rvBtns) await tap(p, '#rvBtns button >> nth=' + (Math.random() < 0.5 ? 0 : 1));
-      if(vis.drive && Math.random() < 0.2) await tap(p, '#driveQs button >> nth=' + Math.floor(Math.random() * 18));
+      if(vis.drive && Math.random() < 0.4) await tap(p, '#driveQs button >> nth=' + Math.floor(Math.random() * 18));
       if(Math.random() < 0.05) await tap(p, '#syncBtn');
-      if(Math.random() < 0.5){ await tap(p, Math.random() < 0.5 ? '#runBtn' : '#passBtn'); calls++; }
+      if(vis.play && Math.random() < 0.8){ await tap(p, Math.random() < 0.5 ? '#runBtn' : '#passBtn'); calls++; }
+      /* Jon asks the room. At 60x a snap goes by every half second, faster
+         than anyone could answer, so the replay holds still for a moment
+         while the room answers - the huddle - and then Jon locks (as if at
+         the snap) or lets the window run. */
+      if(p === phones[2].p){
+        if(!huddle && vis.askPlay && Math.random() < 0.4){ await tap(p, '#askPlay'); pushes++; huddle = 3; await tv.evaluate(() => GD.host.source.pause()); }
+        else if(!huddle && vis.askDrive && Math.random() < 0.15){ await tap(p, '#askDrive'); pushes++; huddle = 3; await tv.evaluate(() => GD.host.source.pause()); }
+      }
     }
     // drives only, switched on from the jumbotron's keyboard, and back
-    if(!modeTested && v.n > 20 && !v.tv){
-      modeTested = true;
-      await tv.keyboard.press('m');
-      await sleep(1200);
-      const hidden = await phones[0].p.evaluate(() => document.getElementById('snap').classList.contains('hide'));
-      const drv = await tv.evaluate(() => document.body.classList.contains('drives'));
-      ok(hidden && drv, 'M switches the room to drives only: the phones lose RUN/PASS, the board grows the drive question');
-      await tv.keyboard.press('m');
-      await sleep(1200);
-      ok(!(await phones[0].p.evaluate(() => document.getElementById('snap').classList.contains('hide'))), 'M again: back to every play');
+    // the jumbotron can ask too: A calls for a play, and every phone shows it
+    if(!keyTested && v.n > 20 && !v.tv){
+      const open = await tv.evaluate(() => GD.host.S.pp.some(q => !q.target && !q.void));
+      if(!open){
+        keyTested = true;
+        await tv.keyboard.press('a');
+        await sleep(1200);
+        const shown = await phones[0].p.evaluate(() => !document.getElementById('snap').classList.contains('hide') && /the TV called/.test(document.getElementById('snapH').textContent));
+        ok(shown, 'A on the jumbotron calls for a play, and the phones show it');
+      }
     }
     // people wander off: a reload, and a phone that comes back as a stranger
     if(!rejoinTested && v.n > 50 && !v.tv && !v.rv){
@@ -131,18 +143,31 @@ try {
       ok(/Welcome back, Jon/.test(backT) && Object.keys(after).length === 3, 'Jon on a "new phone" gets his score back: "' + backT + '"');
       ok(after.Ava >= before.Ava && after.Jon >= before.Jon, 'no score lost (Ava ' + before.Ava + ' -> ' + after.Ava + ', Jon ' + before.Jon + ' -> ' + after.Jon + ')');
     }
-    if(!flagged && v.n > 60){ flagged = true; await phones[2].p.click('#flagBtn'); await phones[2].p.click('#flagBtn'); }
+    // the huddle is over: Jon locks (as if at the snap) or lets it run, and play goes on
+    if(huddle && --huddle === 0){
+      const j = phones[2].p;
+      if(Math.random() < 0.6){
+        const l = await j.evaluate(() => ({p: !document.getElementById('lockPlay').classList.contains('hide'), d: !document.getElementById('lockDrive').classList.contains('hide')}));
+        if(l.p){ await tap(j, '#lockPlay'); locks++; }
+        if(l.d){ await tap(j, '#lockDrive'); locks++; }
+      }
+      await tv.evaluate(() => GD.host.source.resume());
+    }
+    if(!flagged && v.n > 60 && !v.tv && !huddle){ flagged = true; await tap(phones[2].p, '#flagBtn'); await tap(phones[2].p, '#flagBtn'); }
     if(v.phase === 'final') break;
     await sleep(400);
   }
   const S = await tv.evaluate(() => { const S = GD.host.S; return {phase: S.phase, players: Object.values(S.players).map(p => ({n: p.name, s: p.score, calls: p.calls, tv: p.tvRight})), rounds: S.tvN, rv: S.rv && S.rv.state}; });
   console.log('  ' + S.players.map(p => p.n + ' ' + p.s + ' pts, ' + p.calls + ' calls settled').join(' · ') + ' · ' + S.rounds + ' trivia rounds');
   ok(S.phase === 'final', 'reached the final whistle');
-  ok(S.players.every(p => p.calls > 10), 'every phone\'s calls were settled');
+  const PU = await tv.evaluate(() => ({pp: GD.host.S.pp.length, dvs: GD.host.S.dvs.filter(d => d.push).length, picks: GD.host.S.dvs.reduce((a, d) => a + Object.keys(d.picks).length, 0)}));
+  ok(pushes > 5 && locks > 0, 'a phone asked the room ' + pushes + ' times and locked ' + locks);
+  ok(S.players.every(p => p.calls > 3), 'every phone\'s answers to called plays were settled');
+  ok(PU.dvs > 3 && PU.picks > 0, 'drive guesses settled: ' + PU.dvs + ' drives asked about, ' + PU.picks + ' sets of guesses');
   ok(S.players.some(p => p.s > 0), 'points were scored');
   ok(sawTrivia && sawTvOnPhone && answered > 0, 'trivia ran on the jumbotron and the phones (' + answered + ' answers)');
   ok(sawReview, 'a review was flagged from a phone');
-  ok(modeTested && rejoinTested, 'the mode and rejoin checks ran');
+  ok(keyTested && rejoinTested, 'the jumbotron-key and rejoin checks ran');
   const tickets = await phones[0].p.evaluate(() => document.querySelectorAll('#tickets .tk').length);
   ok(tickets >= 2, 'a phone shows its results (' + tickets + ')');
   const sit = await phones[0].p.evaluate(() => document.getElementById('sitT').textContent);

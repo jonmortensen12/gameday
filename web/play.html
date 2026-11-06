@@ -81,7 +81,7 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 #foot { display: flex; gap: 10px; margin: 16px 0 26px; }
 #foot button { flex: 1; font-size: 15px; padding: 12px 6px; background: #071634; }
 #foot button.arm { background: #5a4500; border-color: var(--gold); }
-#toast { position: fixed; left: 12px; right: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 30; padding: 16px; border-radius: 16px; font-size: 18px; font-weight: 800; text-align: center; transform: translateY(160%); transition: transform 0.35s; box-shadow: 0 10px 30px #000a; }
+#toast { pointer-events: none; position: fixed; left: 12px; right: 12px; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 30; padding: 16px; border-radius: 16px; font-size: 18px; font-weight: 800; text-align: center; transform: translateY(160%); transition: transform 0.35s; box-shadow: 0 10px 30px #000a; }
 #toast.on { transform: none; }
 #toast.right { background: #0f6b45; } #toast.wrong { background: #3a1820; } #toast.none { background: #1c2c55; }
 #reconn { position: sticky; top: 0; z-index: 6; background: #6b4a00; color: #fff3cf; text-align: center; padding: 12px; font-weight: 800; }
@@ -91,7 +91,18 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 #back button { flex: 1; font-size: 14px; padding: 10px; }
 #driveCard.main h3 { font-size: 22px; }
 #driveCard.main #driveBtns button { font-size: 20px; padding: 24px 6px; }
-#modeNote { color: var(--dim); font-size: 13px; text-align: center; margin-top: 10px; }
+#askRow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+#askRow button { font-size: 16px; padding: 18px 6px; background: linear-gradient(180deg, #16408a, #0b2a63); border-color: #4f7fd6; }
+#askRow button:disabled { opacity: 0.35; }
+#askNote { color: var(--dim); font-size: 13px; text-align: center; margin-top: 6px; }
+.pushH { display: flex; align-items: baseline; gap: 8px; }
+.pushH b { flex: 1; font-size: 18px; }
+.pushH .clk { color: var(--gold); font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.lockBtn { width: 100%; margin-top: 12px; font-size: 18px; padding: 16px; background: var(--gold); color: #261d00; border-color: #fff3c4; }
+.card.locked { opacity: 0.75; }
+.card.locked button:not(.lockBtn) { pointer-events: none; }
+#snap { border-color: #4f7fd6; }
+#driveCard { border-color: #4f7fd6; }
 #sitBar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #06132e; border-bottom: 1px solid var(--line); font-size: 14px; position: sticky; top: 49px; z-index: 4; }
 #sitBar .t { flex: 1; font-weight: 700; }
 #sitBar .t b { color: var(--gold); }
@@ -145,7 +156,7 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 
 /* kids: bigger, simpler */
 body.kid #callRow button { font-size: 40px; padding: 40px 8px; }
-body.kid #bigBtn, body.kid #foot, body.kid .dq.extra { display: none; }
+body.kid #bigBtn, body.kid #foot, body.kid .dq.extra, body.kid #askRow, body.kid #askNote, body.kid #syncRow { display: none; }
 body.kid #tvA button { font-size: 24px; padding: 20px; }
 </style>
 </head>
@@ -189,17 +200,29 @@ body.kid #tvA button { font-size: 24px; padding: 20px; }
       <div class="why" id="rvWhy"></div>
     </div>
 
-    <div class="card" id="snap">
-      <h3>Next snap <small id="snapSub">call it before the snap</small></h3>
+    <div id="askRow">
+      <button id="askPlay">📣 Call the next play</button>
+      <button id="askDrive">🏈 New drive</button>
+    </div>
+    <div id="askNote">Ask the room: everyone gets 30 s to call a play, or 2 minutes to guess a drive.</div>
+
+    <div class="card hide" id="snap">
+      <div class="pushH"><b id="snapH">📣 Call the next play</b><span class="clk" id="snapClk"></span></div>
+      <div class="why" id="snapWhy" style="margin:2px 0 10px"></div>
       <div id="callRow">
         <button data-v="run" id="runBtn">RUN<span>🏃</span></button>
         <button data-v="pass" id="passBtn">PASS<span>🏈</span></button>
       </div>
       <button id="bigBtn">🔥 Big play (15+ yards)</button>
-      <div id="lockMsg"></div>
-      <div id="tickets"></div>
+      <button class="lockBtn hide" id="lockPlay">🔒 Lock everyone's guesses<br><small>tap it at the snap</small></button>
     </div>
-    <div id="syncRow"><span id="syncT">Not synced to your TV yet.</span><button id="syncBtn">⏱ Tap at the snap</button></div>
+
+    <div class="card hide" id="driveCard">
+      <div class="pushH"><b id="driveH">🏈 Next drive</b><span class="clk" id="driveClk"></span></div>
+      <div class="why" id="driveWhy" style="margin-top:2px"></div>
+      <div id="driveQs"></div>
+      <button class="lockBtn hide" id="lockDrive">🔒 Lock everyone's guesses<br><small>tap it at the drive's first snap</small></button>
+    </div>
 
     <div class="card hide" id="curCard">
       <h3 id="curH">This drive</h3>
@@ -207,12 +230,11 @@ body.kid #tvA button { font-size: 24px; padding: 20px; }
       <div class="chips" id="curMine"></div>
     </div>
 
-    <div id="modeNote" class="hide">Drives only right now - guess how each drive goes.</div>
-    <div class="card hide" id="driveCard">
-      <h3 id="driveH">Next drive</h3>
-      <div class="why" style="margin-top:0">Your guesses count for the next drive to start on your TV. The moment it starts, new guesses go to the one after.</div>
-      <div id="driveQs"></div>
+    <div class="card" id="resCard">
+      <h3>Latest results</h3>
+      <div id="tickets"></div>
     </div>
+    <div id="syncRow"><span id="syncT">Not synced to your TV yet.</span><button id="syncBtn">⏱ Tap at the snap</button></div>
 
     <div id="top3"></div>
     <div id="foot">
@@ -401,16 +423,18 @@ function render(){
       btns.innerHTML = ''; $('rvWhy').textContent = r.fixed ? 'Corrected by the official feed.' : '';
     }
   }
-  // the snap
-  $('snapSub').textContent = v.phase === 'final' ? 'game over' : 'call it before the snap';
   const tk = v.tickets.slice().reverse();
   let html = '';
-  if(v.pend) html += '<div class="tk"><span class="ic">⏳</span><span class="tx"><b>' + LABEL[v.pend.v] + (v.pend.big ? ' 🔥' : '') + '</b> - for the next snap on your TV</span></div>';
-  tk.filter(t => !t.drive).slice(0, 3).forEach(t => {
+  tk.slice(0, 3).forEach(t => {
+    if(t.drive){
+      const g = t.got || {}, n = Object.keys(g).length, r = Object.values(g).filter(Boolean).length;
+      html += '<div class="tk"><span class="ic">' + (t.res === 'wrong' ? '❌' : t.res === 'none' ? '➖' : '✅') + '</span><span class="tx"><b>Drive: ' + r + ' of ' + n + ' right</b><br>' + esc(t.line) + '</span>' + (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div>';
+      return;
+    }
     const ic = t.res === 'right' ? '✅' : t.res === 'wrong' ? '❌' : '➖';
     html += '<div class="tk"><span class="ic">' + ic + '</span><span class="tx"><b>' + esc(LABEL[t.v] + (t.big ? ' 🔥' : '')) + '</b>' + (t.sit ? ' · ' + esc(t.sit) : '') + '<br>' + esc(t.line || '') + '</span>' + (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div>';
   });
-  $('tickets').innerHTML = html || '<div class="tk"><span class="tx">Tap RUN or PASS before each snap. You\'ll see if you were right about 30-60 seconds later, once the play reaches ESPN.</span></div>';
+  $('tickets').innerHTML = html || '<div class="tk"><span class="tx">Nothing yet. Results arrive 30-60 seconds after each play, once it reaches ESPN.</span></div>';
   // a new result: say so
   const key = tk.map(t => t.at + t.line).join('|');
   if(seenTickets !== null && tk[0] && key !== seenTickets && !seenTickets.startsWith(tk[0].at + tk[0].line)){
@@ -428,10 +452,19 @@ function render(){
   $('syncT').textContent = v.synced ? '✓ Synced to your TV. Tap ⏱ at any snap to keep it sharp.' : 'Not synced to your TV yet: tap ⏱ the moment the ball is snapped, a few times.';
   $('syncBtn').classList.toggle('done', !!v.snapTapped);
   $('syncBtn').textContent = v.snapTapped ? '✓ Got it' : '⏱ Tap at the snap';
-  // drives only: no run/pass, the drive questions are the game
-  const drivesOnly = v.mode === 'drives';
-  $('snap').classList.toggle('hide', drivesOnly);
-  $('modeNote').classList.toggle('hide', !drivesOnly);
+  renderAsk(v);
+  renderPlay(v);
+  // somebody asked the room: say so (the phone may be on another screen of ours)
+  if(v.play && v.play.open && v.play.n !== seenPush.play){
+    if(seenPush.play !== undefined && !v.play.mineBy){ toast('📣 ' + esc(v.play.by) + ' called for a play! ' + v.play.left + ' s', 'none'); buzz([60, 40, 60]); }
+    seenPush.play = v.play.n;
+  }
+  if(v.dpush && v.dpush.open && v.dpush.n !== seenPush.drive){
+    if(seenPush.drive !== undefined && !v.dpush.mineBy){ toast('🏈 New drive: guess how it goes!', 'none'); buzz([60, 40, 60]); }
+    seenPush.drive = v.dpush.n;
+  }
+  if(seenPush.play === undefined) seenPush.play = null;
+  if(seenPush.drive === undefined) seenPush.drive = null;
   renderDrive(v);
   renderHist(v);
   // trivia
@@ -467,25 +500,60 @@ const mineLocal = {};       // what this phone just tapped, until the TV confirm
     b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
   });
 })();
+/* ---------- asking the room ---------- */
+function renderAsk(v){
+  const final = v.phase === 'final';
+  $('askPlay').disabled = !v.can.play; $('askDrive').disabled = !v.can.drive;
+  $('askPlay').textContent = v.play ? '📣 Play called' : '📣 Call the next play';
+  $('askDrive').textContent = v.dpush ? '🏈 Drive started' : '🏈 New drive';
+  $('askRow').classList.toggle('hide', final);
+  $('askNote').textContent = final ? '' :
+    v.play && v.play.open ? '📣 A play is being called - answer below.' :
+    v.play ? 'The called play is locked and waiting for ESPN (30-60 s) before the next one.' :
+    v.dpush && v.dpush.open ? '🏈 Drive guesses are open - answer below.' :
+    'Ask the room: everyone gets 30 s to call a play, or 2 minutes to guess a drive.';
+}
+let myPlay = null, myBig = false;
+const seenPush = {};
+function renderPlay(v){
+  const q = v.play;
+  $('snap').classList.toggle('hide', !q);
+  if(!q){ myPlay = null; myBig = false; return; }
+  $('snap').classList.toggle('locked', !q.open);
+  $('snapH').textContent = q.mineBy ? '📣 You called for a play' : '📣 ' + q.by + ' called for a play';
+  $('snapClk').textContent = q.open ? q.left + 's' : '🔒';
+  const m = q.mine;
+  if(m && (!myPlay || myPlay.at < Date.now() - 3000)){ myPlay = {v: m.v, at: 0}; myBig = m.big; }
+  $('snapWhy').textContent = q.open ? (m ? 'You said ' + LABEL[m.v] + (m.big ? ' 🔥' : '') + '. You can change it until it locks.' : 'Run or pass? The next snap on your TV.') :
+    (m ? 'Locked: you said ' + LABEL[m.v] + (m.big ? ' 🔥' : '') + '. Result in 30-60 s, when ESPN catches up.' : 'Locked. You didn\'t call this one.');
+  const cur = myPlay && myPlay.v;
+  $('runBtn').classList.toggle('sel', cur === 'run'); $('passBtn').classList.toggle('sel', cur === 'pass');
+  $('bigBtn').classList.toggle('sel', myBig);
+  $('lockPlay').classList.toggle('hide', !(q.mineBy && q.open));
+}
 function renderDrive(v){
-  const d = v.drive;
-  $('driveCard').classList.toggle('hide', !d);
-  $('curCard').classList.toggle('hide', !(d && d.cur));
-  if(!d) return;
-  $('driveH').textContent = 'Next drive' + (d.next.team ? ' · probably ' + d.next.team : '');
-  const mine = d.next.mine || {};
-  QS.forEach(q => {
-    // the TV's answer wins once it has caught up with a tap
-    const loc = mineLocal[q.f];
-    const val = loc && Date.now() - loc.at < 4000 ? loc.v : mine[q.f];
-    $('driveQs').querySelectorAll('button[data-f="' + q.f + '"]').forEach(b => b.classList.toggle('sel', b.dataset.v === val));
-  });
-  if(d.cur){
-    const c = d.cur, live = c.live;
+  const q = v.dpush, c = v.drive;
+  $('driveCard').classList.toggle('hide', !q);
+  $('curCard').classList.toggle('hide', !c);
+  if(q){
+    $('driveCard').classList.toggle('locked', !q.open);
+    $('driveH').textContent = q.auto ? '🏈 New drive (ESPN: the ball changed hands)' : q.mineBy ? '🏈 You started the next drive' : '🏈 ' + q.by + ' started the next drive';
+    $('driveClk').textContent = q.open ? Math.floor(q.left / 60) + ':' + String(q.left % 60).padStart(2, '0') : '🔒';
+    $('driveWhy').textContent = q.open ? 'Guess how the next drive to start on your TV goes. Locks at its first snap or when the time runs out.' :
+      'Locked. Results when the drive ends.';
+    const mine = q.mine || {};
+    QS.forEach(x => {
+      const loc = mineLocal[x.f];
+      const val = loc && Date.now() - loc.at < 4000 ? loc.v : mine[x.f];
+      $('driveQs').querySelectorAll('button[data-f="' + x.f + '"]').forEach(b => b.classList.toggle('sel', b.dataset.v === val));
+    });
+    $('lockDrive').classList.toggle('hide', !(q.mineBy && q.open));
+  } else Object.keys(mineLocal).forEach(k => delete mineLocal[k]);
+  if(c){
     $('curH').textContent = 'Now: ' + (c.team || 'this') + ' drive';
-    $('curLive').textContent = live ? live.plays + ' play' + (live.plays === 1 ? '' : 's') + ' · ' + live.yards + ' yds' + (live.flag ? ' · 🚩' : '') + ' so far' : 'Just started';
+    $('curLive').textContent = c.live ? c.live.plays + ' play' + (c.live.plays === 1 ? '' : 's') + ' · ' + c.live.yards + ' yds' + (c.live.flag ? ' · 🚩' : '') + ' so far' : 'Just started';
     const m = c.mine;
-    $('curMine').innerHTML = m ? QS.filter(q => q.f in m).map(q => '<span>' + esc(NAME[q.f + ':' + m[q.f]]) + (q.f === 'plays' ? ' plays' : q.f === 'yards' ? ' yds' : q.f === 'flag' ? (m.flag === 'yes' ? '' : '') : '') + '</span>').join('') :
+    $('curMine').innerHTML = m ? QS.filter(x => x.f in m).map(x => '<span>' + esc(NAME[x.f + ':' + m[x.f]]) + (x.f === 'plays' ? ' plays' : x.f === 'yards' ? ' yds' : x.f === 'time' ? '' : '') + '</span>').join('') :
       '<span style="background:none;color:var(--dim);font-weight:400;padding:0">No guesses on this one</span>';
   }
 }
@@ -524,17 +592,22 @@ $('syncBtn').onclick = () => { tx({t: 'snap'}); buzz(40); $('syncBtn').classList
 $('backOk').onclick = () => $('back').classList.add('hide');
 $('backNo').onclick = () => { $('back').classList.add('hide'); tx({t: 'fresh', dev, name: recall('gday_name'), kid}); };
 
-/* the snap: RUN or PASS, stamped by the TV the moment it arrives */
-let big = false, lockT = 0;
+/* a called play: RUN or PASS (and 🔥), changeable until it locks */
 document.querySelectorAll('#callRow button').forEach(b => b.onclick = () => {
-  tx({t: 'call', v: b.dataset.v, big});
+  myPlay = {v: b.dataset.v, at: Date.now()};
+  tx({t: 'call', v: b.dataset.v, big: myBig});
   buzz(15);
-  $('runBtn').classList.toggle('sel', b.dataset.v === 'run'); $('passBtn').classList.toggle('sel', b.dataset.v === 'pass');
-  $('lockMsg').textContent = 'Locked: ' + LABEL[b.dataset.v] + (big ? ' 🔥' : '') + ' for the next snap';
-  clearTimeout(lockT);
-  lockT = setTimeout(() => { $('runBtn').classList.remove('sel'); $('passBtn').classList.remove('sel'); $('lockMsg').textContent = ''; big = false; $('bigBtn').classList.remove('sel'); }, 7000);
+  if(V) renderPlay(V);
 });
-$('bigBtn').onclick = () => { big = !big; $('bigBtn').classList.toggle('sel', big); };
+$('bigBtn').onclick = () => {
+  myBig = !myBig;
+  if(myPlay) { myPlay.at = Date.now(); tx({t: 'call', v: myPlay.v, big: myBig}); }
+  $('bigBtn').classList.toggle('sel', myBig);
+};
+$('askPlay').onclick = () => { tx({t: 'push', kind: 'play'}); buzz(30); };
+$('askDrive').onclick = () => { tx({t: 'push', kind: 'drive'}); buzz(30); };
+$('lockPlay').onclick = () => { tx({t: 'lock', kind: 'play'}); buzz([40, 30, 40]); };
+$('lockDrive').onclick = () => { tx({t: 'lock', kind: 'drive'}); buzz([40, 30, 40]); };
 $('kickBtn').onclick = () => { tx({t: 'kick'}); buzz(40); };
 
 /* the two buttons a kid could set off by accident: tap twice */

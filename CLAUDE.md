@@ -23,8 +23,8 @@ internet. Run the checks from the repo root.
 ## Before shipping
 
 ```
-node gamecheck.mjs   # the game, headless, through three real recorded games: calls, drives, reviews, trivia, the TV delay
-node netcheck.mjs    # the jumbotron and three phones in Chromium over ?local=1, a replayed game at 60x, the fake camera
+node gamecheck.mjs   # the game, headless, through four real recorded games: pushed plays and drives, locks, reviews, trivia, the TV delay
+node netcheck.mjs    # the jumbotron and three phones in Chromium over ?local=1, a replayed game at 60x, the fake camera (several minutes)
 node camcheck.mjs    # the Cougar Cam finds three people across a pretend living room (needs ffmpeg + Pillow)
 python3 tools/lag.py cfb EVENT 600   # how far behind the ESPN feed is during a live game
 ```

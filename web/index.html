@@ -159,9 +159,8 @@ body.drives #drive .opts b { font-size: 64px; }
     <div class="note">A rehearsal plays the real feed back from kickoff, as if live. Find the game's replay video, start it, and tap KICK on a phone at the opening kickoff - the game lines itself up with the video. <b>P</b> pauses along with the video.</div>
     <div class="row" id="speeds" style="margin-top:8px"><button data-s="1" class="sel">Real time</button><button data-s="4">4× (a quick look)</button><button data-s="20">20×</button></div>
 
-    <h2>What the room calls</h2>
-    <div class="row" id="modes"><button data-m="plays" class="sel">Every play + every drive</button><button data-m="drives">Drives only</button></div>
-    <div class="note">Drives only: one question per possession - how does it end? - for a room that would rather watch than tap. Switch any time during the game with <b>M</b> or the button at the bottom of the board.</div>
+    <h2>How it works</h2>
+    <div class="note" style="font-size:16px">Nobody has to guess anything until someone asks. On any phone: <b>📣 Call the next play</b> gives everyone 30 s to call run or pass, and <b>🏈 New drive</b> gives everyone 2 minutes to guess how the next drive goes. Whoever asked can <b>lock everyone's guesses</b> at the snap. If nobody starts a new drive, ESPN does when it reports the ball changing hands.</div>
 
     <h2>The room</h2>
     <label><input type="checkbox" id="useCam" checked> Use this laptop's camera and microphone (Cougar Cam, reaction replays)</label>
@@ -196,7 +195,7 @@ body.drives #drive .opts b { font-size: 64px; }
   <div id="center">
     <div id="kickBox" class="panel hide"><b>🏈 Tap KICK on your phone the moment the ball is kicked</b><div class="note" id="kickNote">That lines the game up with this TV.</div></div>
     <div id="next" class="panel">
-      <div class="lbl">Next snap · the room's call</div>
+      <div class="lbl" id="nextL">Called play</div>
       <div id="splitBox"></div>
     </div>
     <div id="lastBox" class="panel">
@@ -205,7 +204,7 @@ body.drives #drive .opts b { font-size: 64px; }
     </div>
     <div id="drive" class="panel">
       <div id="cur" class="hide"></div>
-      <div class="lbl" id="driveL">Next drive</div>
+      <div class="lbl" id="driveL">Drive guesses</div>
       <div class="opts" id="driveO"></div>
       <div id="driveLast"></div>
     </div>
@@ -214,7 +213,7 @@ body.drives #drive .opts b { font-size: 64px; }
     <div class="lbl">Leaderboard</div>
     <ol id="lbList"></ol>
   </div>
-  <div id="foot"><span id="ticker"></span><span class="sp"></span><button id="modeChip" title="M">Mode: every play</button><button id="flagChip" title="X">🚩 Review</button><span id="people"></span></div>
+  <div id="foot"><span id="ticker"></span><span class="sp"></span><button id="askChip" title="A">📣 Call a play</button><button id="driveChip" title="D">🏈 New drive</button><button id="flagChip" title="X">🚩 Review</button><span id="people"></span></div>
 </div>
 
 <div class="over" id="tvOver">
@@ -257,8 +256,8 @@ body.drives #drive .opts b { font-size: 64px; }
   <kbd>F</kbd> full screen · <kbd>H</kbd> this help<br>
   <kbd>C</kbd> Cougar Cam now · <kbd>R</kbd> pretend the room just went off<br>
   <kbd>T</kbd> trivia round now · <kbd>V</kbd> play the reaction reel<br>
-  <kbd>M</kbd> every play / drives only<br>
-  <kbd>Space</kbd> at a snap on the TV: sync the delay<br>
+  <kbd>A</kbd> call for a play · <kbd>D</kbd> start drive guesses<br>
+  <kbd>Space</kbd> at a snap on the TV: lock what this laptop asked for, and sync<br>
   <kbd>X</kbd> start a review · <kbd>1</kbd> it stands · <kbd>2</kbd> overturned<br>
   <kbd>[</kbd> <kbd>]</kbd> TV delay -1 s / +1 s<br>
   <kbd>P</kbd> pause a rehearsal · <kbd>→</kbd> skip it 30 s<br>
@@ -281,14 +280,7 @@ const isLocal = GDNet.isLocal();
 
 /* ---------- setup: which game ---------- */
 const MAIN = {league: 'cfb', event: '401856849', team: '252', label: 'BYU at Utah', replay: false};
-let choice = null, speed = +(Q.get('speed') || 1), mode = Q.get('mode') === 'drives' ? 'drives' : 'plays';
-let modePicked = !!Q.get('mode');
-function toggleMode(){ if(host) host.setMode(host.S.mode === 'drives' ? 'plays' : 'drives'); }
-document.querySelectorAll('#modes button').forEach(b => b.addEventListener('click', () => { modePicked = true; }));
-document.querySelectorAll('#modes button').forEach(b => {
-  b.classList.toggle('sel', b.dataset.m === mode);
-  b.onclick = () => { mode = b.dataset.m; document.querySelectorAll('#modes button').forEach(x => x.classList.toggle('sel', x === b)); };
-});
+let choice = null, speed = +(Q.get('speed') || 1);
 
 function choose(c){
   choice = c;
@@ -360,15 +352,14 @@ let host = null, cam = null, view = null, room = null;
 function start(c){
   $('setup').classList.add('hide');
   const src = c.replay ? replaySource(c.league, c.event, {speed, preroll: +(Q.get('preroll') || 120)}) : liveSource(c.league, c.event);
-  host = createHost({cfg: {league: c.league, event: c.event, team: c.team, mode, seed: (Math.random() * 2 ** 31) | 0},
+  host = createHost({cfg: {league: c.league, event: c.event, team: c.team, speed: c.replay ? speed : 1, seed: (Math.random() * 2 ** 31) | 0},
     source: src, fresh: Q.get('fresh') === '1',
     onView: (v, S, now) => { view = v; render(v, S, now); },
     onRoom: r => { room = r; renderRoom(r); },
   });
   window.GD = {host, cam: null, choice: c};
-  // a game carried on from before keeps its mode unless one was picked now
-  if(host.S.mode !== mode && modePicked) host.setMode(mode);
-  $('modeChip').onclick = toggleMode;
+  $('askChip').onclick = () => host.push('play');
+  $('driveChip').onclick = () => host.push('drive');
   $('flagChip').onclick = () => host.flag();
   if($('useCam').checked && Q.get('nocam') !== '1') startCam();
   document.title = 'Game Day · ' + c.label;
@@ -418,36 +409,43 @@ function render(v, S, now){
     $('sit').innerHTML = x ? 'Q' + x.q + ' <b>' + esc(x.clock) + '</b> · ' + (x.team ? esc(x.team) + ' ball · ' : '') + esc(x.text || '') +
       ' <span class="bd ' + (x.fresh ? 'now' : 'lag') + '">' + (x.fresh ? 'NOW' : 'ESPN CATCHING UP') + '</span>' : '';
   }
-  document.body.classList.toggle('drives', v.mode === 'drives');
-  $('modeChip').textContent = v.mode === 'drives' ? 'Mode: drives only' : 'Mode: every play';
-  const lastDrive = v.log.filter(l => l.k === 'drive').pop();
   $('driveLast').textContent = v.lastDrive ? 'Last: ' + v.lastDrive : '';
   // the room
   $('rocN').textContent = v.rocN ? v.roc + '%' : '-';
   $('rocF').style.width = (v.rocN ? v.roc : 0) + '%';
-  const sp = v.split, tot = sp.run + sp.pass;
-  $('splitBox').innerHTML = tot ? '<div class="split"><div class="run" style="flex-grow:' + Math.max(sp.run, 0.0001) + '">RUN ' + sp.run + '</div><div class="pass" style="flex-grow:' + Math.max(sp.pass, 0.0001) + '">PASS ' + sp.pass + '</div></div>' +
-    (sp.big ? '<div class="note">🔥 ' + sp.big + ' calling a big play</div>' : '') : '<div class="none">Call the next snap on your phone: run or pass?</div>';
+  // a called play: the room's split while it is open, then the answer
+  const pl = v.play;
+  if(pl){
+    const t = pl.tally || {}, run = t.run || 0, pass = t.pass || 0;
+    $('nextL').textContent = '📣 ' + pl.by + ' called for a play · ' + (pl.open ? pl.left + ' s to call it' : pl.tapLock ? '🔒 locked at the snap - waiting for ESPN' : '🔒 locked - waiting for ESPN');
+    $('splitBox').innerHTML = '<div class="split"><div class="run" style="flex-grow:' + Math.max(run, 0.0001) + '">RUN ' + run + '</div><div class="pass" style="flex-grow:' + Math.max(pass, 0.0001) + '">PASS ' + pass + '</div></div>' +
+      (t.big ? '<div class="note">🔥 ' + t.big + ' calling a big play</div>' : '');
+  } else {
+    $('nextL').textContent = 'Called play';
+    $('splitBox').innerHTML = '<div class="none">📣 Anyone can call for a play from their phone</div>';
+  }
   const lc = v.lastCall;
   if(lc && lc.kind && (lc.kind === 'run' || lc.kind === 'pass')){
     const n = lc.run + lc.pass;
-    $('last').innerHTML = '<span class="ok">' + lc.kind.toUpperCase() + '</span> · ' + (n ? '<b>' + lc.right + ' of ' + n + '</b> called it' : 'nobody called it') + '<br>' + esc(lc.line);
+    $('last').innerHTML = '<span class="ok">' + lc.kind.toUpperCase() + '</span> · ' + (n ? '<b>' + lc.right + ' of ' + n + '</b> called it' : 'nobody called it') + (lc.sit ? ' · ' + esc(lc.sit) : '') + '<br>' + esc(lc.line);
   } else if(v.lastPlay) $('last').innerHTML = esc(v.lastPlay.line);
-  // the drive question
-  const d = v.drive;
-  if(d){
-    $('drive').classList.remove('hide');
-    const c = d.cur;
-    $('cur').classList.toggle('hide', !c);
-    if(c){
-      const t = c.tally || {}, picks = Object.entries(t).sort((a, b) => b[1] - a[1]).map(([k, n]) => n + ' ' + DRIVE_LABEL[k]).join(' · ');
-      $('cur').innerHTML = 'Now: <b>' + esc(c.team) + ' drive</b> · ' + (c.live ? c.live.plays + ' plays, ' + c.live.yards + ' yds' + (c.live.flag ? ', 🚩' : '') + ' so far' : 'just started') +
-        '<div class="note">' + (picks ? 'The room said: ' + esc(picks) : 'Nobody guessed this one') + '</div>';
-    }
-    $('driveL').textContent = 'Next drive' + (d.next.team ? ' (' + d.next.team + ')' : '') + ' · guess on your phone, locks when it starts';
-    const tl = d.next.tally.res || {};
+  // drives: the one on the TV, and the guessing for the next
+  const c = v.drive, dp = v.dpush;
+  $('cur').classList.toggle('hide', !c);
+  if(c){
+    const t = c.tally || {}, picks = Object.entries(t).sort((a, b) => b[1] - a[1]).map(([k, n]) => n + ' ' + DRIVE_LABEL[k]).join(' · ');
+    $('cur').innerHTML = 'Now: <b>' + esc(c.team) + ' drive</b> · ' + (c.live ? c.live.plays + ' plays, ' + c.live.yards + ' yds' + (c.live.flag ? ', 🚩' : '') + ' so far' : 'just started') +
+      '<div class="note">' + (picks ? 'The room said: ' + esc(picks) : 'Nobody guessed this one') + '</div>';
+  }
+  if(dp){
+    $('driveL').textContent = '🏈 Next drive · ' + (dp.auto ? 'ESPN says the ball changed hands' : dp.by + ' started it') + ' · ' +
+      (dp.open ? Math.floor(dp.left / 60) + ':' + String(dp.left % 60).padStart(2, '0') + ' to guess' : '🔒 locked');
+    const tl = (dp.tally && dp.tally.res) || {};
     $('driveO').innerHTML = ['td', 'fg', 'punt', 'turnover'].map(k => '<div><b>' + (tl[k] || 0) + '</b>' + DRIVE_LABEL[k] + '</div>').join('');
-  } else $('drive').classList.add('hide');
+  } else {
+    $('driveL').textContent = 'Drive guesses';
+    $('driveO').innerHTML = '<div style="flex:1;color:var(--dim)">🏈 When the ball changes hands, anyone can start guessing the next drive</div>';
+  }
   // kickoff
   $('kickBox').classList.toggle('hide', !v.kick);
   if(v.kick) $('kickNote').textContent = v.kick.taps ? v.kick.taps + ' tapped · lining up with this TV' : (v.synced ? 'Lined up: this TV is ' + (v.D / 1000).toFixed(0) + ' s behind real time.' : 'That lines the game up with this TV.');
@@ -468,7 +466,7 @@ function tickerText(l){
   if(l.k === 'drive') return l.line;
   if(l.k === 'synced') return 'Lined up with this TV (' + (l.d / 1000).toFixed(0) + ' s behind real time, ' + l.n + ' tap' + (l.n > 1 ? 's' : '') + ')';
   if(l.k === 'ruling') return 'Review: the call ' + (l.v === 'overturned' ? 'was OVERTURNED' : 'STANDS') + (l.fixed ? ' (corrected by the feed)' : '');
-  if(l.k === 'mode') return l.mode === 'drives' ? 'Now: drives only' : 'Now: calling every play';
+  if(l.k === 'push') return l.kind === 'play' ? '📣 ' + l.by + ' called for a play' : '🏈 New drive: ' + (l.by === 'ESPN' ? 'ESPN says the ball changed hands' : l.by + ' started the guessing');
   if(l.k === 'review') return '🚩 Review flagged by ' + l.by;
   return '';
 }
@@ -630,8 +628,10 @@ addEventListener('keydown', e => {
   if(k === 'c') runCam('key');
   if(k === 'r' && cam) cam.shout();
   if(k === 't') host.trivia();
-  if(k === 'm') toggleMode();
-  if(e.key === ' '){ e.preventDefault(); host.snap(); }
+  if(k === 'a') host.push('play');
+  if(k === 'd') host.push('drive');
+  // Space at a snap: lock what the TV asked for, and sync either way
+  if(e.key === ' '){ e.preventDefault(); host.lock('play'); host.lock('drive'); host.snap(); }
   if(k === 'x') host.flag();
   if(k === '1') host.act('_tv', {t: 'ref', v: 'stands'});
   if(k === '2') host.act('_tv', {t: 'ref', v: 'overturned'});

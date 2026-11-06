@@ -104,6 +104,8 @@ export function createHost(opts){
       case 'kick': G.kick(S, id, now); break;
       case 'snap': G.snap(S, id, now); break;
       case 'dpick': G.drivePick(S, id, now, String(d.f), String(d.v)); break;
+      case 'push': G.push(S, d.kind === 'drive' ? 'drive' : 'play', id, now); break;
+      case 'lock': G.lock(S, id, now, d.kind === 'drive' ? 'drive' : 'play'); break;
       case 'ad': G.ad(S, id, now); break;
       case 'ans': G.answer(S, id, now, d.n | 0, d.i | 0); break;
       case 'kid': if(S.players[id]) S.players[id].kid = !!d.v; break;
@@ -177,7 +179,9 @@ export function createHost(opts){
     get S(){ return S; }, get N(){ return N; }, room, source: src, roomInfo,
     now: () => src.now(),
     /* the jumbotron's own keys */
-    setMode(m){ G.setMode(S, m, src.now()); persist(); },
+    // the jumbotron's own keys: push, and lock whatever is open
+    push(kind){ G.push(S, kind, '_tv', src.now()); },
+    lock(kind){ G.lock(S, '_tv', src.now(), kind); },
     flag(){ G.flag(S, '_tv', src.now()); },
     snap(){ G.snap(S, '_tv', src.now()); },
     nudgeD(ms){ S.D += ms; S.dTaps = S.dTaps.map(x => x + ms); },
