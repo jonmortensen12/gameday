@@ -223,6 +223,7 @@ body.drives #drive .opts b { font-size: 64px; }
   <div id="tvA"></div>
   <div id="tvMeta"></div>
   <div id="tvKid"></div>
+  <div class="note" style="margin-top:22px">Want the game back? ⏭ on a phone, or <b>E</b> here, ends the trivia. So does calling for a play.</div>
 </div>
 <div class="over" id="rvOver">
   <div class="kicker">🚩 Flagged by <span id="rvBy"></span></div>
@@ -255,7 +256,7 @@ body.drives #drive .opts b { font-size: 64px; }
   <b>Keys</b><br>
   <kbd>F</kbd> full screen · <kbd>H</kbd> this help<br>
   <kbd>C</kbd> Cougar Cam now · <kbd>R</kbd> pretend the room just went off<br>
-  <kbd>T</kbd> trivia round now · <kbd>V</kbd> play the reaction reel<br>
+  <kbd>T</kbd> trivia round now · <kbd>E</kbd> end it · <kbd>V</kbd> play the reaction reel<br>
   <kbd>A</kbd> call for a play · <kbd>D</kbd> start drive guesses<br>
   <kbd>Space</kbd> at a snap on the TV: lock what this laptop asked for, and sync<br>
   <kbd>X</kbd> start a review · <kbd>1</kbd> it stands · <kbd>2</kbd> overturned<br>
@@ -419,7 +420,8 @@ function render(v, S, now){
     const t = pl.tally || {}, run = t.run || 0, pass = t.pass || 0;
     $('nextL').textContent = '📣 ' + pl.by + ' called for a play · ' + (pl.open ? pl.left + ' s to call it' : pl.tapLock ? '🔒 locked at the snap - waiting for ESPN' : '🔒 locked - waiting for ESPN');
     $('splitBox').innerHTML = '<div class="split"><div class="run" style="flex-grow:' + Math.max(run, 0.0001) + '">RUN ' + run + '</div><div class="pass" style="flex-grow:' + Math.max(pass, 0.0001) + '">PASS ' + pass + '</div></div>' +
-      (t.big ? '<div class="note">🔥 ' + t.big + ' calling a big play</div>' : '');
+      ([t.big ? '🔥 ' + t.big + ' big play' : '', t.to ? '💥 ' + t.to + ' turnover' : '', t.fg ? '🥅 ' + t.fg + ' field goal' : '', t.punt ? '🦶 ' + t.punt + ' punt' : '']
+        .filter(Boolean).map(x => '<span class="note" style="margin-right:14px">' + x + '</span>').join(''));
   } else {
     $('nextL').textContent = 'Called play';
     $('splitBox').innerHTML = '<div class="none">📣 Anyone can call for a play from their phone</div>';
@@ -428,6 +430,8 @@ function render(v, S, now){
   if(lc && lc.kind && (lc.kind === 'run' || lc.kind === 'pass')){
     const n = lc.run + lc.pass;
     $('last').innerHTML = '<span class="ok">' + lc.kind.toUpperCase() + '</span> · ' + (n ? '<b>' + lc.right + ' of ' + n + '</b> called it' : 'nobody called it') + (lc.sit ? ' · ' + esc(lc.sit) : '') + '<br>' + esc(lc.line);
+  } else if(lc && lc.kind === 'special' && lc.ans){
+    $('last').innerHTML = '<span class="ok">' + esc(lc.ans) + '</span> · ' + (lc.kicks ? '<b>' + lc.right + ' of ' + lc.kicks + '</b> called it' : 'nobody called it') + '<br>' + esc(lc.line);
   } else if(v.lastPlay) $('last').innerHTML = esc(v.lastPlay.line);
   // drives: the one on the TV, and the guessing for the next
   const c = v.drive, dp = v.dpush;
@@ -466,6 +470,7 @@ function tickerText(l){
   if(l.k === 'drive') return l.line;
   if(l.k === 'synced') return 'Lined up with this TV (' + (l.d / 1000).toFixed(0) + ' s behind real time, ' + l.n + ' tap' + (l.n > 1 ? 's' : '') + ')';
   if(l.k === 'ruling') return 'Review: the call ' + (l.v === 'overturned' ? 'was OVERTURNED' : 'STANDS') + (l.fixed ? ' (corrected by the feed)' : '');
+  if(l.k === 'skip') return '⏭ ' + l.by + ' ended the trivia';
   if(l.k === 'push') return l.kind === 'play' ? '📣 ' + l.by + ' called for a play' : '🏈 New drive: ' + (l.by === 'ESPN' ? 'ESPN says the ball changed hands' : l.by + ' started the guessing');
   if(l.k === 'review') return '🚩 Review flagged by ' + l.by;
   return '';
@@ -628,6 +633,7 @@ addEventListener('keydown', e => {
   if(k === 'c') runCam('key');
   if(k === 'r' && cam) cam.shout();
   if(k === 't') host.trivia();
+  if(k === 'e') host.endTrivia();
   if(k === 'a') host.push('play');
   if(k === 'd') host.push('drive');
   // Space at a snap: lock what the TV asked for, and sync either way

@@ -68,6 +68,29 @@ export function reviewOf(text){
   return 'pending';
 }
 
+/* What happened on a kick, from ESPN's words. A punt's statYardage is its
+   return yardage (0 when nobody returned it). Fakes never say "fake" - a
+   run or pass on 4th down when a kick was called is one (game.js). */
+export function kickOf(type, text, yards){
+  const T = String(type || ''), x = String(text || '');
+  const blocked = /(punt|kick|field goal)[^.]*\bblocked\b|\bblocked by\b|^blocked/i.test(x) || /^blocked/i.test(T);
+  if(/field goal/i.test(T) || (/field goal/i.test(x) && !/punt/i.test(T))){
+    if(blocked) return {fg: 'blocked'};
+    if(/good/i.test(T) && !/no good/i.test(T)) return {fg: 'good'};
+    if(/miss|no good/i.test(T)) return {fg: 'miss'};
+    return /no good|missed|wide|short/i.test(x) ? {fg: 'miss'} : /\bgood\b/i.test(x) ? {fg: 'good'} : null;
+  }
+  if(!/punt/i.test(T) && !/\bpunts?\b/i.test(x)) return null;
+  if(blocked) return {punt: 'blocked'};
+  if(/muff/i.test(x)) return {punt: 'muffed'};
+  if(/fair catch/i.test(x)) return {punt: 'fair'};
+  // college says "return 9 yards"; the NFL "L.McCaffrey to 50 for 27 yards"
+  const returned = /return/i.test(T) || /\breturns?\b|\breturn for\b|ran ob/i.test(x) || +yards !== 0 ||
+    /Center-\S+\s+.*\bfor (-?\d+ yards?|no gain)\b/.test(x);
+  if(returned) return {punt: 'ret', ret: +yards || 0};
+  return {punt: 'none'};       // out of bounds, downed, touchback, or rolled dead
+}
+
 const RESULT = {TD: 'td', FG: 'fg', PUNT: 'punt', 'BLOCKED PUNT': 'turnover', DOWNS: 'turnover',
   INT: 'turnover', FUMBLE: 'turnover', 'MISSED FG': 'turnover', 'INT TD': 'turnover',
   'FUMBLE RETURN TD': 'turnover', 'FUMBLE TD': 'turnover', 'PUNT TD': 'turnover', SF: 'turnover', SAFETY: 'turnover',
@@ -150,7 +173,10 @@ export function normalize(d){
         nx: e.down ? {down: e.down, dist: e.distance || 0, spot: e.possessionText || '', text: e.downDistanceText || '', team: e.team ? String(e.team.id) : ''} : null,
         yards: +p.statYardage || 0, td: /touchdown/i.test(type) || /touchdown/i.test(p.text || ''),
         scoring: !!p.scoringPlay, turnover: !!p.isTurnover || /turnover on downs/i.test(p.text || ''),
-        review: reviewOf(p.text), home: +p.homeScore || 0, away: +p.awayScore || 0});
+        review: reviewOf(p.text), home: +p.homeScore || 0, away: +p.awayScore || 0,
+        kick: kind === 'special' ? kickOf(type, p.text, p.statYardage) : null,
+        // the ball lost on a run or pass (an interception, a fumble the other side recovered); not on downs
+        lost: !!p.isTurnover && !/turnover on downs/i.test(p.text || '') && /intercept|fumble|opp/i.test(type + ' ' + (p.text || ''))});
       dr.plays.push(String(p.id));
     });
   });

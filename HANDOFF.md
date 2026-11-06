@@ -62,16 +62,35 @@ replaced the always-open RUN/PASS card, the always-open next-drive card and
 the drives-only mode.
 
 - **📣 Call the next play** (any grown-up's phone, or `A` on the
-  jumbotron): everybody gets **30 s** to call RUN / PASS (+ 🔥 big play,
-  15+ yards). 10 pts, +10 if a third or fewer of the room (3+ people)
-  called it, ×1.5 at a 3-streak, ×2 at 5; big play +20, a missed big play
-  breaks the streak.
+  jumbotron): everybody gets **30 s**. The card has three tabs, and opens
+  on the likely one (4th down on their own side: Punt; past midfield:
+  Field goal). Every button shows its points - the rarer, the more
+  (`CALLS` in `game.js`, from 19 recorded games, 3,347 plays):
+  - **Run / Pass** 10 (+10 if a third or fewer of 3+ people called it,
+    ×1.5 at a 3-streak, ×2 at 5). Add-ons, which cost the streak when
+    they miss: 🔥 big play 15+ yds +20; 💥 turnover +100 (the ball lost on
+    1.2% of runs and passes; interceptions and lost fumbles, not downs).
+  - **Field goal**: good 10 (80%), missed 40 (18%), blocked 150 (2%).
+  - **Punt**: fair catch 15 (33%), no return 15 (35%: out of bounds,
+    downed, touchback), returned under 5 yds 30 (15%), 5-14 50 (8%), 15+
+    50 (9%), muffed 150 (<1%), blocked 150.
+  - **Go for it / fake** 60, on either kick tab: right when the play is a
+    run or pass on 4th down. ESPN never says "fake" and cannot tell one
+    from going for it (teams went for it on 26% of 4th downs, 13% on their
+    own side), so it is priced as going for it. A kick called on 1st-3rd
+    down that turns out a run or pass scores nothing either way.
+  - Kick outcomes come from `kickOf()` in `feed.js`: ESPN's words (fair
+    catch, muff, blocked, downed, out of bounds, touchback, "Field Goal
+    Good/Missed", "Blocked ...") and, for returns, the punt's statYardage,
+    which is the return yardage. ("Illegal Block" penalties are not blocked
+    kicks.)
 - **🏈 New drive** (any phone, `D` on the jumbotron, or **the feed** when it
   reports the ball changing hands - a score, punt, turnover, missed field
   goal, downs, halftime - or at the first KICK tap - unless the next drive
   has already started on the TV): everybody gets **120 s** for five
   questions about the next drive: how it ends (TD / FG / punt / turnover,
-  where missed FG and downs are turnovers, 25 pts), plays (1-3 / 4-5 / 6-8
+  where missed FG and downs are turnovers; punt 20, TD 25, turnover 35, FG
+  80, from how 380 real drives ended: 38% / 30% / 23% / 9.5%), plays (1-3 / 4-5 / 6-8
   / 9+), yards (<10 / 10-29 / 30-59 / 60+), time of possession (<1:30 /
   1:30-2:30 / 2:30-4:00 / 4:00+) (15 pts each) and a penalty flag yes/no
   (10). The buckets are the quartiles of 465 real drives. Settled from
@@ -100,7 +119,9 @@ the drives-only mode.
 - **Trivia** — 3 questions × 15 s when the feed shows a break: the kickoff
   after a score, a timeout, end of Q1/Q3; 10 at halftime. At least
   3 minutes between rounds unless a phone presses 📺. Kids get their own
-  bank on the same clock. 15 pts + up to 5 for speed.
+  bank on the same clock. 15 pts + up to 5 for speed. **Ending it early**:
+  ⏭ on any grown-up's phone (tap twice), `E` on the jumbotron, or calling
+  for a play or a drive - all go straight back to the game.
 - **ROC meter** — the room's accuracy over its last 40 calls.
 - In a sped-up rehearsal the answer windows stay 30 s and 120 s of real
   time (`S.speed`).
@@ -162,8 +183,8 @@ awards. **It makes no sound at all.**
 ## Phone protocol
 
 phone → host: `hello {dev, name, kid}`, `call {v: run|pass, big}`,
-`push {kind: play|drive}`, `lock {kind}`, `call {v, big}` (answer the
-called play), `dpick {f: res|plays|yards|time|flag, v}` (answer the
+`push {kind: play|drive}`, `lock {kind}`, `call {v: run|pass|fg:...|punt:..., big, to}`
+(answer the called play), `skip` (end trivia), `dpick {f: res|plays|yards|time|flag, v}` (answer the
 drive push), `snap` (⏱), `flag`, `rvote {v}`, `ref {v: stands|overturned|none}`,
 `kick`, `ad`, `ans {n, i}`, `fresh {dev, name, kid}` ("not me"), `bye`
 (the page closed), `ping` (every 2.5 s; 8 s silent = away).

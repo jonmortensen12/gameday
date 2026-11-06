@@ -68,8 +68,7 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 #callRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 #callRow button { font-size: 30px; padding: 30px 8px; border-radius: 22px; }
 #callRow button span { display: block; font-size: 15px; font-weight: 600; margin-top: 4px; opacity: 0.8; }
-#bigBtn { width: 100%; margin-top: 10px; font-size: 16px; padding: 10px; background: #071634; }
-#bigBtn.sel { background: #5a2b00; color: #ffd9a8; border-color: #ff9a3c; }
+
 #lockMsg { text-align: center; color: var(--gold); font-weight: 700; min-height: 1.4em; margin-top: 10px; }
 #tickets { margin-top: 12px; }
 .tk { display: flex; gap: 10px; align-items: flex-start; padding: 9px 4px; border-bottom: 1px solid #16306a; font-size: 14px; }
@@ -102,6 +101,20 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 .card.locked { opacity: 0.75; }
 .card.locked button:not(.lockBtn) { pointer-events: none; }
 #snap { border-color: #4f7fd6; }
+#modeRow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+#modeRow button { font-size: 13px; padding: 9px 2px; background: #071634; border-radius: 10px; }
+#modeRow button.on { background: #1d4f8a; border-color: #8db8ff; }
+#kickGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#kickGrid button { font-size: 15px; padding: 14px 4px; }
+.pts { display: block; font-size: 12px; font-weight: 800; color: var(--gold); margin-top: 3px; }
+button.sel .pts { color: #8a5a00; }
+#addRow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+#addRow button { font-size: 14px; padding: 10px 4px; background: #071634; }
+#bigBtn.sel { background: #5a2b00; color: #ffd9a8; border-color: #ff9a3c; }
+#toBtn.sel { background: #5a0f1c; color: #ffd0d8; border-color: #ff5c7a; }
+#fourth { color: var(--gold); font-size: 13px; font-weight: 700; margin: -4px 0 8px; }
+#tvSkip { width: 100%; margin-top: 26px; background: #071634; font-size: 15px; }
+#tvSkip.arm { background: #5a4500; border-color: var(--gold); }
 #driveCard { border-color: #4f7fd6; }
 #sitBar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: #06132e; border-bottom: 1px solid var(--line); font-size: 14px; position: sticky; top: 49px; z-index: 4; }
 #sitBar .t { flex: 1; font-weight: 700; }
@@ -156,7 +169,7 @@ input { font: inherit; font-size: 20px; width: 100%; padding: 14px; border-radiu
 
 /* kids: bigger, simpler */
 body.kid #callRow button { font-size: 40px; padding: 40px 8px; }
-body.kid #bigBtn, body.kid #foot, body.kid .dq.extra, body.kid #askRow, body.kid #askNote, body.kid #syncRow { display: none; }
+body.kid #addRow, body.kid #modeRow, body.kid #foot, body.kid #tvSkip, body.kid .dq.extra, body.kid #askRow, body.kid #askNote, body.kid #syncRow { display: none; }
 body.kid #tvA button { font-size: 24px; padding: 20px; }
 </style>
 </head>
@@ -209,11 +222,20 @@ body.kid #tvA button { font-size: 24px; padding: 20px; }
     <div class="card hide" id="snap">
       <div class="pushH"><b id="snapH">📣 Call the next play</b><span class="clk" id="snapClk"></span></div>
       <div class="why" id="snapWhy" style="margin:2px 0 10px"></div>
-      <div id="callRow">
-        <button data-v="run" id="runBtn">RUN<span>🏃</span></button>
-        <button data-v="pass" id="passBtn">PASS<span>🏈</span></button>
+      <div id="modeRow"><button data-m="rp" class="on">🏃 Run / Pass</button><button data-m="fg">🥅 Field goal</button><button data-m="punt">🦶 Punt</button></div>
+      <div id="fourth" class="hide"></div>
+      <div id="rpBox">
+        <div id="callRow">
+          <button data-v="run" id="runBtn">RUN<span>🏃</span><b class="pts">+10</b></button>
+          <button data-v="pass" id="passBtn">PASS<span>🏈</span><b class="pts">+10</b></button>
+        </div>
+        <div id="addRow">
+          <button id="bigBtn">🔥 Big play 15+ yds<b class="pts">+20</b></button>
+          <button id="toBtn">💥 Turnover<b class="pts">+100</b></button>
+        </div>
+        <div class="why">Add-ons pay on top when they happen; when they don't, they cost you your streak.</div>
       </div>
-      <button id="bigBtn">🔥 Big play (15+ yards)</button>
+      <div id="kickGrid" class="hide"></div>
       <button class="lockBtn hide" id="lockPlay">🔒 Lock everyone's guesses<br><small>tap it at the snap</small></button>
     </div>
 
@@ -255,6 +277,7 @@ body.kid #tvA button { font-size: 24px; padding: 20px; }
   <div id="tvQ"></div>
   <div id="tvA"></div>
   <div id="tvRes"></div>
+  <button id="tvSkip">⏭ Back to the game - end trivia</button>
 </div>
 
 <div id="toast"></div>
@@ -378,7 +401,16 @@ function toast(text, cls){
   t.className = 'on ' + cls; t.innerHTML = text;
   clearTimeout(t._h); t._h = setTimeout(() => { t.className = cls; }, 3200);
 }
-const LABEL = {run: 'RUN', pass: 'PASS', td: 'Touchdown', fg: 'Field goal', punt: 'Punt', turnover: 'Turnover'};
+const LABEL = {run: 'RUN', pass: 'PASS', td: 'Touchdown', fg: 'Field goal', punt: 'Punt', turnover: 'Turnover',
+  'fg:good': 'FG good', 'fg:miss': 'FG missed', 'fg:blocked': 'FG blocked', 'fg:fake': 'Go for it / fake',
+  'punt:fair': 'Fair catch', 'punt:none': 'No return', 'punt:ret0': 'Return under 5', 'punt:ret5': 'Return 5-14', 'punt:ret15': 'Return 15+',
+  'punt:muffed': 'Muffed punt', 'punt:blocked': 'Blocked punt', 'punt:fake': 'Go for it / fake'};
+/* what each call is worth (game.js CALLS): the rarer, the more */
+const KICKS = {
+  fg: [['fg:good', '✅ Good', 10], ['fg:miss', '❌ Missed', 40], ['fg:blocked', '🖐 Blocked', 150], ['fg:fake', '🏃 Go for it / fake', 60]],
+  punt: [['punt:fair', '🙌 Fair catch', 15], ['punt:none', '🛑 No return', 15], ['punt:ret0', '↩️ Return < 5 yds', 30], ['punt:ret5', '↩️ Return 5-14', 50],
+    ['punt:ret15', '↩️ Return 15+', 50], ['punt:muffed', '🫳 Muffed', 150], ['punt:blocked', '🖐 Blocked', 150], ['punt:fake', '🏃 Go for it / fake', 60]],
+};
 
 function render(){
   const v = V;
@@ -432,7 +464,7 @@ function render(){
       return;
     }
     const ic = t.res === 'right' ? '✅' : t.res === 'wrong' ? '❌' : '➖';
-    html += '<div class="tk"><span class="ic">' + ic + '</span><span class="tx"><b>' + esc(LABEL[t.v] + (t.big ? ' 🔥' : '')) + '</b>' + (t.sit ? ' · ' + esc(t.sit) : '') + '<br>' + esc(t.line || '') + '</span>' + (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div>';
+    html += '<div class="tk"><span class="ic">' + ic + '</span><span class="tx"><b>' + esc((LABEL[t.v] || t.v) + (t.big ? ' 🔥' : '') + (t.to ? ' 💥' : '')) + '</b>' + (t.sit ? ' · ' + esc(t.sit) : '') + (t.res === 'wrong' && t.ans ? ' · it was: ' + esc(t.ans) : '') + '<br>' + esc(t.line || '') + '</span>' + (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div>';
   });
   $('tickets').innerHTML = html || '<div class="tk"><span class="tx">Nothing yet. Results arrive 30-60 seconds after each play, once it reaches ESPN.</span></div>';
   // a new result: say so
@@ -443,8 +475,8 @@ function render(){
       if(t.res === 'none') {}
       else { toast((t.res === 'wrong' ? '❌ ' : '✅ ') + 'Drive: ' + Object.values(t.got || {}).filter(Boolean).length + ' of ' + Object.keys(t.got || {}).length + ' right' + (t.pts ? ' · +' + t.pts : ''), t.res === 'wrong' ? 'wrong' : 'right'); buzz(t.pts ? [30, 50, 30] : 20); }
     }
-    else if(t.res === 'right'){ toast('✅ ' + LABEL[t.v] + '! +' + t.pts + (t.few ? ' · only ' + t.few + ' called it' : '') + (t.streak >= 3 ? ' · 🔥' + t.streak + ' in a row' : ''), 'right'); buzz([30, 50, 30]); }
-    else if(t.res === 'wrong') { toast('❌ It was a ' + (t.kind || 'the other one') + (t.sit ? ' · ' + esc(t.sit) : '') + (t.bigHit ? ' · but 🔥 +20' : ''), 'wrong'); buzz(20); }
+    else if(t.res === 'right'){ toast((t.toHit ? '💥 TURNOVER! ' : '✅ ' + (LABEL[t.v] || t.v) + '! ') + '+' + t.pts + (t.few ? ' · only ' + t.few + ' called it' : '') + (t.streak >= 3 ? ' · 🔥' + t.streak + ' in a row' : ''), 'right'); buzz([30, 50, 30]); }
+    else if(t.res === 'wrong') { toast('❌ It was: ' + esc(t.ans || t.kind || 'the other one') + (t.sit ? ' · ' + esc(t.sit) : ''), 'wrong'); buzz(20); }
     else toast('➖ ' + esc(t.line || 'No call on that one'), 'none');
   }
   seenTickets = key;
@@ -483,13 +515,13 @@ function renderSit(v){
 
 /* ---------- drives ---------- */
 const QS = [
-  {f: 'res', l: 'How does it end?', o: [['td', '🏈 TD'], ['fg', '🥅 FG'], ['punt', '🦶 Punt'], ['turnover', '🔄 Turnover']]},
-  {f: 'plays', l: 'How many plays?', o: [['p1', '1-3'], ['p4', '4-5'], ['p6', '6-8'], ['p9', '9+']]},
-  {f: 'yards', l: 'Total yards?', o: [['y0', 'Under 10'], ['y10', '10-29'], ['y30', '30-59'], ['y60', '60+']]},
-  {f: 'time', l: 'Time it takes?', o: [['t0', '< 1:30'], ['t90', '1:30-2:30'], ['t150', '2:30-4:00'], ['t240', '4:00+']]},
-  {f: 'flag', l: 'A penalty flag?', o: [['yes', '🚩 Yes'], ['no', 'No flag']]},
+  {f: 'res', l: 'How does it end?', o: [['td', '🏈 TD<b class="pts">+25</b>'], ['fg', '🥅 FG<b class="pts">+80</b>'], ['punt', '🦶 Punt<b class="pts">+20</b>'], ['turnover', '🔄 Turnover<b class="pts">+35</b>']]},
+  {f: 'plays', l: 'How many plays? (+15)', o: [['p1', '1-3'], ['p4', '4-5'], ['p6', '6-8'], ['p9', '9+']]},
+  {f: 'yards', l: 'Total yards? (+15)', o: [['y0', 'Under 10'], ['y10', '10-29'], ['y30', '30-59'], ['y60', '60+']]},
+  {f: 'time', l: 'Time it takes? (+15)', o: [['t0', '< 1:30'], ['t90', '1:30-2:30'], ['t150', '2:30-4:00'], ['t240', '4:00+']]},
+  {f: 'flag', l: 'A penalty flag? (+10)', o: [['yes', '🚩 Yes'], ['no', 'No flag']]},
 ];
-const NAME = {}; QS.forEach(q => q.o.forEach(([k, n]) => { NAME[q.f + ':' + k] = n; }));
+const NAME = {}; QS.forEach(q => q.o.forEach(([k, n]) => { NAME[q.f + ':' + k] = n.replace(/<b.*<\/b>/, ''); }));
 const mineLocal = {};       // what this phone just tapped, until the TV confirms it
 (function(){
   $('driveQs').innerHTML = QS.map(q => '<div class="dq ' + q.f + (q.f === 'res' ? '' : ' extra') + '"><div class="l">' + q.l + '</div><div class="o' + (q.o.length === 2 ? ' two' : '') + '">' +
@@ -513,22 +545,59 @@ function renderAsk(v){
     v.dpush && v.dpush.open ? '🏈 Drive guesses are open - answer below.' :
     'Ask the room: everyone gets 30 s to call a play, or 2 minutes to guess a drive.';
 }
-let myPlay = null, myBig = false;
+let myPlay = null, myBig = false, myTo = false, mode = 'rp', modeFor = 0;
 const seenPush = {};
+const fam = v => !v ? null : v === 'run' || v === 'pass' ? 'rp' : v.split(':')[0];
+function setMode(m){
+  mode = m;
+  document.querySelectorAll('#modeRow button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  $('rpBox').classList.toggle('hide', m !== 'rp');
+  $('kickGrid').classList.toggle('hide', m === 'rp');
+  if(m !== 'rp'){
+    $('kickGrid').innerHTML = KICKS[m].map(([k, n, p]) => '<button data-v="' + k + '">' + n + '<b class="pts">+' + p + '</b></button>').join('');
+    $('kickGrid').querySelectorAll('button').forEach(b => b.onclick = () => choose(b.dataset.v));
+  }
+  paintPlay();
+}
+function choose(v){
+  myPlay = {v, at: Date.now()};
+  if(fam(v) !== 'rp'){ myBig = false; myTo = false; }
+  tx({t: 'call', v, big: myBig, to: myTo});
+  buzz(15);
+  paintPlay();
+}
+function paintPlay(){
+  const cur = myPlay && myPlay.v;
+  $('runBtn').classList.toggle('sel', cur === 'run'); $('passBtn').classList.toggle('sel', cur === 'pass');
+  $('bigBtn').classList.toggle('sel', myBig); $('toBtn').classList.toggle('sel', myTo);
+  $('kickGrid').querySelectorAll('button').forEach(b => b.classList.toggle('sel', b.dataset.v === cur));
+}
 function renderPlay(v){
   const q = v.play;
   $('snap').classList.toggle('hide', !q);
-  if(!q){ myPlay = null; myBig = false; return; }
+  if(!q){ myPlay = null; myBig = false; myTo = false; return; }
+  // a new call: start on the likely kind of play (4th down: a kick)
+  if(modeFor !== q.n){
+    modeFor = q.n;
+    const x = v.sit, fourth = x && /^4th/.test(x.text || '');
+    const theirSide = fourth && x.team && !new RegExp('at ' + x.team + ' ').test(x.text + ' ');
+    setMode(fourth ? (theirSide ? 'fg' : 'punt') : 'rp');
+  }
+  const x = v.sit;
+  $('fourth').classList.toggle('hide', !(x && /^4th/.test(x.text || '')));
+  $('fourth').textContent = x && /^4th/.test(x.text || '') ? '4th down (' + x.text + '): field goal, punt - or going for it?' : '';
   $('snap').classList.toggle('locked', !q.open);
   $('snapH').textContent = q.mineBy ? '📣 You called for a play' : '📣 ' + q.by + ' called for a play';
   $('snapClk').textContent = q.open ? q.left + 's' : '🔒';
   const m = q.mine;
-  if(m && (!myPlay || myPlay.at < Date.now() - 3000)){ myPlay = {v: m.v, at: 0}; myBig = m.big; }
-  $('snapWhy').textContent = q.open ? (m ? 'You said ' + LABEL[m.v] + (m.big ? ' 🔥' : '') + '. You can change it until it locks.' : 'Run or pass? The next snap on your TV.') :
-    (m ? 'Locked: you said ' + LABEL[m.v] + (m.big ? ' 🔥' : '') + '. Result in 30-60 s, when ESPN catches up.' : 'Locked. You didn\'t call this one.');
-  const cur = myPlay && myPlay.v;
-  $('runBtn').classList.toggle('sel', cur === 'run'); $('passBtn').classList.toggle('sel', cur === 'pass');
-  $('bigBtn').classList.toggle('sel', myBig);
+  if(m && (!myPlay || myPlay.at < Date.now() - 3000)){
+    myPlay = {v: m.v, at: 0}; myBig = !!m.big; myTo = !!m.to;
+    if(fam(m.v) !== mode) setMode(fam(m.v));
+  }
+  const said = m ? LABEL[m.v] + (m.big ? ' 🔥' : '') + (m.to ? ' 💥' : '') : '';
+  $('snapWhy').textContent = q.open ? (m ? 'You said ' + said + '. You can change it until it locks.' : 'What happens on the next snap on your TV?') :
+    (m ? 'Locked: you said ' + said + '. Result in 30-60 s, when ESPN catches up.' : 'Locked. You didn\'t call this one.');
+  paintPlay();
   $('lockPlay').classList.toggle('hide', !(q.mineBy && q.open));
 }
 function renderDrive(v){
@@ -564,7 +633,7 @@ function renderHist(v){
   if($('histTab').classList.contains('hide')) return;
   const r = v.rec;
   const box = (t, a, extra) => '<div><b>' + a[0] + ' / ' + a[1] + '</b>' + t + ' <small>' + pct(a) + (extra || '') + '</small></div>';
-  $('rec').innerHTML = box('Plays called', r.calls) + box('Big plays', r.big) + box('Drive endings', r.drive.res) +
+  $('rec').innerHTML = box('Run / pass', r.calls) + box('Kicks & 4th downs', r.kicks) + box('🔥 Big plays', r.big) + box('💥 Turnovers', r.to) + box('Drive endings', r.drive.res) +
     box('Drive plays', r.drive.plays) + box('Drive yards', r.drive.yards) + box('Drive time', r.drive.time) + box('Flags', r.drive.flag) +
     box('Reviews', r.rv) + box('Trivia', r.tv);
   const items = v.tickets.slice().reverse().map(t => {
@@ -575,7 +644,7 @@ function renderHist(v){
         '<table><tr><td></td><td><small>You</small></td><td><small>Actual</small></td><td></td></tr>' + rows + '</table></div>';
     }
     const ic = t.res === 'right' ? '✅' : t.res === 'wrong' ? '❌' : '➖';
-    return '<div class="hd"><div class="top"><span class="x">' + ic + ' ' + LABEL[t.v] + (t.big ? ' 🔥' : '') + (t.kind && t.res === 'wrong' ? ' <small style="color:var(--dim);font-weight:400">it was a ' + esc(t.kind) + '</small>' : '') + '</span>' +
+    return '<div class="hd"><div class="top"><span class="x">' + ic + ' ' + esc(LABEL[t.v] || t.v) + (t.big ? ' 🔥' : '') + (t.to ? ' 💥' : '') + (t.ans && t.res === 'wrong' ? ' <small style="color:var(--dim);font-weight:400">it was: ' + esc(t.ans) + '</small>' : '') + '</span>' +
       (t.pts ? '<span class="p">+' + t.pts + '</span>' : '') + '</div><div class="sub">' + esc(t.sit || '') + '</div><div class="sub">' + esc(t.line || '') + '</div></div>';
   });
   $('hist').innerHTML = items.join('') || '<div class="why">Nothing settled yet. Results arrive about 30-60 seconds after each play.</div>';
@@ -592,18 +661,11 @@ $('syncBtn').onclick = () => { tx({t: 'snap'}); buzz(40); $('syncBtn').classList
 $('backOk').onclick = () => $('back').classList.add('hide');
 $('backNo').onclick = () => { $('back').classList.add('hide'); tx({t: 'fresh', dev, name: recall('gday_name'), kid}); };
 
-/* a called play: RUN or PASS (and 🔥), changeable until it locks */
-document.querySelectorAll('#callRow button').forEach(b => b.onclick = () => {
-  myPlay = {v: b.dataset.v, at: Date.now()};
-  tx({t: 'call', v: b.dataset.v, big: myBig});
-  buzz(15);
-  if(V) renderPlay(V);
-});
-$('bigBtn').onclick = () => {
-  myBig = !myBig;
-  if(myPlay) { myPlay.at = Date.now(); tx({t: 'call', v: myPlay.v, big: myBig}); }
-  $('bigBtn').classList.toggle('sel', myBig);
-};
+/* a called play: RUN or PASS (and 🔥 / 💥), or what a kick does - changeable until it locks */
+document.querySelectorAll('#modeRow button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+document.querySelectorAll('#callRow button').forEach(b => b.onclick = () => choose(b.dataset.v));
+$('bigBtn').onclick = () => { myBig = !myBig; if(myPlay && fam(myPlay.v) === 'rp') choose(myPlay.v); else paintPlay(); };
+$('toBtn').onclick = () => { myTo = !myTo; if(myPlay && fam(myPlay.v) === 'rp') choose(myPlay.v); else paintPlay(); };
 $('askPlay').onclick = () => { tx({t: 'push', kind: 'play'}); buzz(30); };
 $('askDrive').onclick = () => { tx({t: 'push', kind: 'drive'}); buzz(30); };
 $('lockPlay').onclick = () => { tx({t: 'lock', kind: 'play'}); buzz([40, 30, 40]); };
@@ -622,6 +684,7 @@ function twoTap(id, first, again, send){
 }
 twoTap('flagBtn', '🚩 Review on TV', 'Tap again: a review?', () => tx({t: 'flag'}));
 twoTap('adBtn', '📺 Commercial', 'Tap again: trivia now?', () => tx({t: 'ad'}));
+twoTap('tvSkip', '⏭ Back to the game - end trivia', 'Tap again to end trivia for everyone', () => tx({t: 'skip'}));
 
 /* trivia */
 let tvKey = '';

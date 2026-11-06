@@ -96,7 +96,8 @@ export function createHost(opts){
 
   function fromPhone(id, d, now){
     switch(d.t){
-      case 'call': G.call(S, id, now, d.v, d.big); break;
+      case 'call': G.call(S, id, now, String(d.v), d.big, d.to); break;
+      case 'skip': G.endTrivia(S, id, now); break;
       case 'drive': G.driveVote(S, id, now, d.v); break;
       case 'flag': G.flag(S, id, now); break;
       case 'rvote': G.reviewVote(S, id, now, d.v); break;
@@ -186,6 +187,7 @@ export function createHost(opts){
     snap(){ G.snap(S, '_tv', src.now()); },
     nudgeD(ms){ S.D += ms; S.dTaps = S.dTaps.map(x => x + ms); },
     trivia(){ G.ad(S, '_', src.now()); },
+    endTrivia(){ G.endTrivia(S, '_tv', src.now()); },
     reset(){ S = G.create(cfg); persist(); info(); },
     act(id, d){ fromPhone(id, d, src.now()); },      // tests
     destroy(){ dead = true; timers.forEach(clearInterval); persist(); if(handle) handle.destroy(); },

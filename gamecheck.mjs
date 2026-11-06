@@ -15,6 +15,11 @@
      cheater  - answers every pushed play right, 2 s AFTER the snap (must
                 never count)
      coin     - answers pushed plays at random
+     kicker   - on every pushed punt, field goal and 4th-down snap, calls
+                exactly what happens (the return distance, the miss, going
+                for it)
+     gambler  - calls every pushed run or pass right and always adds
+                💥 turnover (+100 only when the ball is lost)
      driver   - answers every pushed drive right, everything about it
      latecomer- answers a pushed drive 3 s after it has started on the TV
                 (must never count)
@@ -40,7 +45,7 @@ async function run(file, team, Dtrue, label, opts = {}){
   const src = replaySource('cfb', 'x', {summary: N, clock: () => cur, preroll: 180});
   await src.ready;
   let SS = G.create({team, seed: 7});
-  ['caller', 'boss', 'oracle', 'cheater', 'coin', 'driver', 'latecomer', 'tapper', 'snapper', 'flagger', 'kid']
+  ['caller', 'boss', 'oracle', 'cheater', 'coin', 'kicker', 'gambler', 'driver', 'latecomer', 'tapper', 'snapper', 'flagger', 'kid']
     .forEach(id => G.join(SS, id, id, id === 'kid'));
   const tvOf = p => p.wall + Dtrue;
   const jitter = () => (Math.random() - 0.5) * 1600;
@@ -52,13 +57,24 @@ async function run(file, team, Dtrue, label, opts = {}){
   // after the snap before it and 10+ s before its own
   const sc = N.plays.filter(scrim);
   let pushed = 0;
+  // what a kick call should have been, for the kicker
+  const kickTruth = p => p.kind === 'special' ? (p.kick && (p.kick.fg ? 'fg:' + p.kick.fg :
+    p.kick.punt === 'ret' ? 'punt:ret' + (p.kick.ret < 5 ? 0 : p.kick.ret < 15 ? 5 : 15) : 'punt:' + p.kick.punt)) : p.down === 4 ? 'punt:fake' : null;
+  let kicks = 0, lostPushed = 0;
   sc.forEach((p, k) => {
-    if(k === 0 || k % 2 || (p.kind !== 'run' && p.kind !== 'pass')) return;
+    const kickish = p.kind === 'special' || p.down === 4;
+    if(k === 0 || (k % 2 && !kickish) || (p.kind !== 'run' && p.kind !== 'pass' && !(p.kind === 'special' && p.kick))) return;
     const snap = tvOf(p), t = Math.max(tvOf(sc[k - 1]) + 2000, snap - 22000);
     if(snap - t < 10000) return;
     pushed++;
     at(t, () => G.push(SS, 'play', 'caller', src.now()));
-    at(snap - 8000, () => G.call(SS, 'oracle', src.now(), p.kind, p.yards >= 15));
+    if(p.kind === 'run' || p.kind === 'pass'){
+      at(snap - 8000, () => G.call(SS, 'oracle', src.now(), p.kind, p.yards >= 15));
+      at(snap - 7000, () => G.call(SS, 'gambler', src.now(), p.kind, false, true));
+      if(p.lost) lostPushed++;
+    }
+    const kt = kickTruth(p);
+    if(kt){ kicks++; at(snap - 6000, () => G.call(SS, 'kicker', src.now(), kt)); }
     at(snap - 12000 + 1000, () => G.call(SS, 'coin', src.now(), Math.random() < 0.5 ? 'run' : 'pass', false));
     at(snap + 2000, () => G.call(SS, 'cheater', src.now(), p.kind, false));
     if(locks && pushed % 3) at(snap + Math.abs(jitter()) * 0.6, () => G.lock(SS, 'caller', src.now(), 'play'));
@@ -133,6 +149,9 @@ async function run(file, team, Dtrue, label, opts = {}){
   ok(Math.abs(SS.D - Dtrue) < 1500, 'D measured from ' + (opts.sync === 'snaps' ? '⏱ taps alone' : 'KICK and lock taps') + ': ' + (SS.D / 1000).toFixed(1) + ' s (true ' + Dtrue / 1000 + ')');
   ok(P.oracle.calls >= pushed * 0.6, 'pushed plays settle: the oracle\'s answer counted on ' + P.oracle.calls + ' of ' + pushed + ' (a push waits while the last unlocked one waits for ESPN)');
   ok(acc('oracle') > 0.97, 'each push is matched to the right play: oracle ' + Math.round(100 * acc('oracle')) + '% right');
+  const kk = P.kicker.kicks || [0, 0];
+  ok(kk[1] >= kicks * 0.6 && kk[0] === kk[1], 'punts, field goals and 4th downs settle: kicker right on ' + kk[0] + ' of ' + kk[1] + ' (' + kicks + ' pushed)');
+  ok((P.gambler.tos || 0) <= lostPushed && P.gambler.toTried > 10 && (lostPushed === 0 || P.gambler.tos > 0), '💥 pays only when the ball is lost: ' + (P.gambler.tos || 0) + ' of ' + P.gambler.toTried + ' (' + lostPushed + ' lost on pushed plays)');
   ok(P.cheater.calls === 0, 'an answer after the snap never counts: cheater ' + P.cheater.calls + ' counted');
   ok(P.coin.calls > 10 && acc('coin') > 0.25 && acc('coin') < 0.75, 'a coin is a coin: ' + Math.round(100 * acc('coin')) + '% of ' + P.coin.calls);
   const dst = P.driver.dstat || {};
@@ -166,6 +185,39 @@ async function run(file, team, Dtrue, label, opts = {}){
     const calls = N.plays.filter(p => p.kind === 'run' || p.kind === 'pass').length;
     ok(calls > 100 && N.drives.every(d => d.result), f + ': ' + N.plays.length + ' plays, ' + calls + ' to call, every drive has an ending');
   }
+}
+
+// kicks: what ESPN's words say happened
+{
+  console.log('\nkicks');
+  const {kickOf} = await import('./web/feed.js');
+  const t = (type, text, y, want) => { const k = kickOf(type, text, y); const got = k ? (k.fg ? 'fg:' + k.fg : 'punt:' + k.punt + (k.punt === 'ret' ? k.ret : '')) : null;
+    ok(got === want, type + ' "' + text.slice(0, 60) + '" -> ' + got); };
+  t('Punt', 'T.Way punts 54 yards to PHI 27, Center-T.Ott, fair catch by C.DeJean.', 0, 'punt:fair');
+  t('Punt', 'B.Mann punts 42 yards to WAS 23, Center-R.Underwood. L.McCaffrey to 50 for 27 yards (R.Underwood).', 27, 'punt:ret27');
+  t('Punt Return', '(07:36) #99 J.DuPont punt 47 yards to the Utah30 #8 M.Carvalho return 9 yards to the Utah39', 9, 'punt:ret9');
+  t('Punt', 'B.Mann punts 56 yards to end zone, Center-R.Underwood, Touchback.PENALTY on WAS-T.Owens, Illegal Block Above the Waist', 0, 'punt:none');
+  t('Punt', 'Sam Vander Haar punt for 34 yds , Mana Carvalho muffs the punt, recovered by BYU', 0, 'punt:muffed');
+  t('Blocked Punt', 'J.Smith punt blocked by K.Jones', 0, 'punt:blocked');
+  t('Field Goal Missed', 'J.Elliott 41 yard field goal is No Good, Hit Left Upright', 0, 'fg:miss');
+  t('Field Goal Good', 'D. Curtis 27 yd FG GOOD', 0, 'fg:good');
+  t('Blocked Field Goal', 'K. Konrardy 48 yd FG BLOCKED', 0, 'fg:blocked');
+}
+
+// trivia can be ended early - by a grown-up, or by asking the room about the game
+{
+  console.log('\ntrivia, cut short');
+  const S = G.create({team: '252'});
+  G.join(S, 'mom', 'Mom'); G.join(S, 'kid', 'Kid', true);
+  G.ad(S, 'mom', 1e6);
+  G.endTrivia(S, 'kid', 1e6 + 2000);
+  ok(S.tv && S.tv.state !== 'done', 'a kid cannot end it');
+  G.endTrivia(S, 'mom', 1e6 + 3000);
+  ok(S.tv.state === 'done' && S.tv.skipped === 'Mom', 'a grown-up can');
+  G.ad(S, 'mom', 1e6 + 70000);
+  ok(S.tv.state !== 'done', '📺 starts another');
+  G.push(S, 'play', 'mom', 1e6 + 72000);
+  ok(S.tv.state === 'done' && S.pp.length === 1, 'calling for a play ends it and opens the play');
 }
 
 // who is who: a phone that lost its saved id gets its score back by name

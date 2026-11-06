@@ -62,14 +62,34 @@ export const T = {
   lockSlack: 3 * SEC,         // a lock tapped this long after the feed's snap still counts as at the snap
   stale: 10 * 60 * SEC,       // a push nothing ever matched is dropped
 };
-export const PTS = {call: 10, minority: 10, big: 20, drive: 25, bucket: 15, dflag: 10, review: 40, flag: 5, trivia: 15, speed: 5};
+export const PTS = {call: 10, minority: 10, big: 20, turnover: 100, drive: 25, bucket: 15, dflag: 10, review: 40, flag: 5, trivia: 15, speed: 5};
+/* Calls on a pushed play, and what each is worth: the rarer, the more.
+   From 19 recorded games (3,347 plays, 2025-26): 80% of field goals good,
+   18% missed, 2% blocked; punts 33% fair catch, 35% not returned (out of
+   bounds, downed, touchback), returned 15% under 5 yards, 8% 5-14, 9% 15+,
+   under 1% muffed; the ball lost on 1.2% of runs and passes. ESPN never
+   says "fake": a run or pass on 4th down is a fake or going for it, and
+   the feed cannot tell which - teams went for it on 26% of 4th downs, 13%
+   on their own side of midfield - so that call is "go for it / fake", 60.
+   RUN and PASS are the coin flip, with the streak and the room's minority
+   bonus on top. */
+export const CALLS = {
+  run: 10, pass: 10,
+  'fg:good': 10, 'fg:miss': 40, 'fg:blocked': 150, 'fg:fake': 60,
+  'punt:fair': 15, 'punt:none': 15, 'punt:ret0': 30, 'punt:ret5': 50, 'punt:ret15': 50, 'punt:muffed': 150, 'punt:blocked': 150, 'punt:fake': 60,
+};
+export const CALL_NAME = {run: 'RUN', pass: 'PASS', 'fg:good': 'FG good', 'fg:miss': 'FG missed', 'fg:blocked': 'FG blocked', 'fg:fake': 'Go for it / fake',
+  'punt:fair': 'Fair catch', 'punt:none': 'No return', 'punt:ret0': 'Return under 5', 'punt:ret5': 'Return 5-14', 'punt:ret15': 'Return 15+',
+  'punt:muffed': 'Muffed punt', 'punt:blocked': 'Blocked punt', 'punt:fake': 'Go for it / fake'};
+const family = v => v === 'run' || v === 'pass' ? 'rp' : v.split(':')[0];
 const DRIVE_OPTS = ['td', 'fg', 'punt', 'turnover'];
 export const DRIVE_LABEL = {td: 'Touchdown', fg: 'Field goal', punt: 'Punt', turnover: 'Turnover', void: 'No result'};
 /* What else to guess about a drive, in buckets that each come up about a
    quarter of the time (465 real drives, 2025-26: plays 3/5/8, yards
    7/27/66, time 1:19/2:14/3:59 at the quartiles; a flag on 43%). */
 export const DRIVE_Q = {
-  res: {label: 'How it ends', opts: DRIVE_OPTS, names: DRIVE_LABEL, pts: PTS.drive},
+  // how drives end (380 real ones): punt 38%, TD 30%, turnover 23%, field goal 9.5%
+  res: {label: 'How it ends', opts: DRIVE_OPTS, names: DRIVE_LABEL, pts: {punt: 20, td: 25, turnover: 35, fg: 80}},
   plays: {label: 'Plays', opts: ['p1', 'p4', 'p6', 'p9'], names: {p1: '1-3', p4: '4-5', p6: '6-8', p9: '9+'}, pts: PTS.bucket,
     of: st => st.plays <= 3 ? 'p1' : st.plays <= 5 ? 'p4' : st.plays <= 8 ? 'p6' : 'p9'},
   yards: {label: 'Yards', opts: ['y0', 'y10', 'y30', 'y60'], names: {y0: 'Under 10', y10: '10-29', y30: '30-59', y60: '60+'}, pts: PTS.bucket,
@@ -164,6 +184,7 @@ export function push(S, kind, id, now){
   const q = {n: ++S.pN, kind, by: id, at: now, until: now + (kind === 'play' ? T.playWindow : T.driveWindow) * (S.speed || 1),
     lockAt: null, tapLock: false, votes: {}, target: null};
   const list = listOf(S, kind);
+  endTrivia(S, id, now);                  // somebody wants the game back
   list.push(q);
   if(list.length > 8) list.shift();
   S.log.push({k: 'push', at: now, kind, by: who(S, id)});
@@ -176,10 +197,11 @@ export function lock(S, id, now, kind){
   q.lockAt = now; q.tapLock = true;
   syncTap(S, id, now, 'snap', true);
 }
-export function call(S, id, now, v, big){
+export function call(S, id, now, v, big, to){
   const p = S.players[id], q = S.pp.filter(x => isOpen(x, now)).pop();
-  if(!p || !q || (v !== 'run' && v !== 'pass')) return;
-  q.votes[id] = {v, big: !!big, t: now};
+  if(!p || !q || !(v in CALLS)) return;
+  const rp = family(v) === 'rp';
+  q.votes[id] = {v, big: rp && !!big, to: rp && !!to, t: now};
 }
 /* A guess about the pushed drive: one question at a time. */
 export function drivePick(S, id, now, f, v){
@@ -245,6 +267,15 @@ export function answer(S, id, now, n, i){
 }
 
 /* ---------- trivia rounds ---------- */
+/* Back to the game: any grown-up (or the jumbotron) can end a round. */
+export function endTrivia(S, id, now){
+  const r = S.tv, p = S.players[id];
+  if(!r || r.state === 'done') return;
+  if(id !== '_tv' && id !== '_auto' && (!p || p.kid)) return;
+  r.state = 'done'; r.doneAt = now; r.skipped = who(S, id);
+  S.tvLast = now;
+  S.log.push({k: 'skip', at: now, by: r.skipped});
+}
 function pickQs(S, n, kid, live){
   const R = rng(S.seed + S.tvN * 977 + (kid ? 13 : 0));
   const pool = BANK.filter(q => !!q.kid === !!kid && S.tvUsed.indexOf(q.id) < 0);
@@ -336,38 +367,70 @@ function tvTime(S, p){ return p.wall + S.D; }
 
 function rocPush(S, ok){ S.roc.push(ok ? 1 : 0); if(S.roc.length > 40) S.roc.shift(); }
 
+/* The right answer to a call of each kind, for the play that happened:
+   'run'/'pass'; 'fg:good'...; 'punt:ret5'...; a run or pass on 4th down
+   when a kick was called is the fake; null when the call does not apply
+   (a field goal called on 3rd down that was a run). */
+function truth(P, fam){
+  if(fam === 'rp') return P.kind === 'run' || P.kind === 'pass' ? P.kind : null;
+  if(P.kind === 'run' || P.kind === 'pass') return P.down === 4 ? fam + ':fake' : null;
+  const k = P.kick;
+  if(!k) return null;
+  if(k.fg) return fam === 'fg' ? 'fg:' + k.fg : 'fg';          // a field goal, but a punt was called: wrong
+  if(fam !== 'punt') return 'punt';
+  return k.punt === 'ret' ? 'punt:ret' + (k.ret < 5 ? 0 : k.ret < 15 ? 5 : 15) : 'punt:' + k.punt;
+}
+export function answerLine(P){
+  if(P.kind === 'run' || P.kind === 'pass') return P.kind.toUpperCase() + (P.down === 4 ? ' on 4th down' : '');
+  const k = P.kick;
+  if(!k) return 'No call';
+  if(k.fg) return CALL_NAME['fg:' + k.fg];
+  return k.punt === 'ret' ? 'Punt returned ' + k.ret + ' yds' : CALL_NAME['punt:' + k.punt];
+}
+
 /* A pushed play came in: settle everybody's call for it. */
 function settleCall(S, P, now, used, q){
   const ids = Object.keys(used);
-  const isCall = P.kind === 'run' || P.kind === 'pass';
-  const share = {run: 0, pass: 0};
-  ids.forEach(id => { share[used[id].v]++; });
-  const big = isCall && P.yards >= T.bigYards;
-  const line = playLine(S, P);
-  const tally = {run: share.run, pass: share.pass, kind: P.kind, line, right: 0, at: now, id: P.id, by: q ? who(S, q.by) : '', sit: P.sit};
+  const share = {};
+  ids.forEach(id => { share[used[id].v] = (share[used[id].v] || 0) + 1; });
+  const big = (P.kind === 'run' || P.kind === 'pass') && P.yards >= T.bigYards;
+  const line = playLine(S, P), ans = answerLine(P);
+  const tally = {run: share.run || 0, pass: share.pass || 0, kicks: ids.filter(id => family(used[id].v) !== 'rp').length,
+    kind: P.kind, ans, line, right: 0, at: now, id: P.id, by: q ? who(S, q.by) : '', sit: P.sit};
   S.lastCall = tally;                     // the jumbotron shows the answer even if nobody guessed
   ids.forEach(id => {
-    const p = S.players[id], c = used[id];
-    const t = {play: P.id, v: c.v, big: c.big, line, at: now, pts: 0, sit: (P.sit ? P.sit + ' · ' : '') + 'Q' + P.period, kind: P.kind};
-    if(!isCall){ t.res = 'none'; ticket(p, t); return; }
-    p.calls++;
-    const ok = c.v === P.kind;
-    if(c.big) p.bigTried = (p.bigTried || 0) + 1;
-    rocPush(S, ok);
+    const p = S.players[id], c = used[id], fam = family(c.v);
+    const tr = truth(P, fam);
+    const t = {play: P.id, v: c.v, big: c.big, to: c.to, line, ans, at: now, pts: 0, sit: (P.sit ? P.sit + ' · ' : '') + 'Q' + P.period, kind: P.kind};
+    if(tr == null){ t.res = 'none'; ticket(p, t); return; }
+    const ok = c.v === tr;
+    if(fam === 'rp'){
+      p.calls++;
+      rocPush(S, ok);
+      if(c.big) p.bigTried = (p.bigTried || 0) + 1;
+      if(c.to) p.toTried = (p.toTried || 0) + 1;
+    } else p.kicks = [(p.kicks || [0, 0])[0] + (ok ? 1 : 0), (p.kicks || [0, 0])[1] + 1];
     if(ok){
-      p.right++; p.streak++; p.best = Math.max(p.best, p.streak);
-      const mult = p.streak >= 5 ? 2 : p.streak >= 3 ? 1.5 : 1;
-      let n = PTS.call;
-      if(share[c.v] / ids.length <= 0.34 && ids.length >= 3){ n += PTS.minority; t.few = share[c.v]; }
-      t.pts += pts(S, p, Math.round(n * mult));
-      t.mult = mult;
+      if(fam === 'rp') p.right++;
+      p.streak++; p.best = Math.max(p.best, p.streak);
+      let n = CALLS[c.v];
+      if(fam === 'rp'){
+        const mult = p.streak >= 5 ? 2 : p.streak >= 3 ? 1.5 : 1;
+        if(share[c.v] / ids.length <= 0.34 && ids.length >= 3){ n += PTS.minority; t.few = share[c.v]; }
+        n = Math.round(n * mult); t.mult = mult;
+      }
+      t.pts += pts(S, p, n);
       tally.right++;
     } else p.streak = 0;
     if(c.big){
       if(big){ t.pts += pts(S, p, PTS.big); t.bigHit = 1; p.bigs++; }
       else { p.streak = 0; t.bigMiss = 1; }
     }
-    t.res = ok ? 'right' : 'wrong';
+    if(c.to){
+      if(P.lost){ t.pts += pts(S, p, PTS.turnover); t.toHit = 1; p.tos = (p.tos || 0) + 1; }
+      else p.streak = 0;
+    }
+    t.res = ok || t.bigHit || t.toHit ? 'right' : 'wrong';
     t.streak = p.streak;
     ticket(p, t);
   });
@@ -468,7 +531,8 @@ function settleDrives(S, N, now){
         p.dstat = p.dstat || {};
         const st = p.dstat[f] = p.dstat[f] || [0, 0];
         st[1]++;
-        if(ok){ st[0]++; right++; t.pts += pts(S, p, DRIVE_Q[f].pts); if(f === 'res') p.drives++; }
+        const worth = typeof DRIVE_Q[f].pts === 'object' ? DRIVE_Q[f].pts[dv.ans[f]] : DRIVE_Q[f].pts;
+        if(ok){ st[0]++; right++; t.pts += pts(S, p, worth); if(f === 'res') p.drives++; }
       });
       if(tried) t.res = right ? (right === tried ? 'right' : 'some') : 'wrong';
       t.right = right; t.tried = tried;
@@ -651,12 +715,17 @@ function pushView(S, kind, now, p){
   if(p){
     v.mineBy = q.by === p.id;
     const m = q.votes[p.id];
-    v.mine = !m ? null : kind === 'play' ? {v: m.v, big: m.big} : Object.fromEntries(Object.entries(m).map(([f, x]) => [f, x.v]));
+    v.mine = !m ? null : kind === 'play' ? {v: m.v, big: m.big, to: m.to} : Object.fromEntries(Object.entries(m).map(([f, x]) => [f, x.v]));
   } else {
     v.n = Object.keys(q.votes).length;
     v.tally = {};
     Object.values(q.votes).forEach(m => {
-      if(kind === 'play'){ v.tally[m.v] = (v.tally[m.v] || 0) + 1; if(m.big) v.tally.big = (v.tally.big || 0) + 1; }
+      if(kind === 'play'){
+        const fam = family(m.v);
+        v.tally[fam === 'rp' ? m.v : fam] = (v.tally[fam === 'rp' ? m.v : fam] || 0) + 1;
+        if(m.big) v.tally.big = (v.tally.big || 0) + 1;
+        if(m.to) v.tally.to = (v.tally.to || 0) + 1;
+      }
       else Object.entries(m).forEach(([f, x]) => { v.tally[f] = v.tally[f] || {}; v.tally[f][x.v] = (v.tally[f][x.v] || 0) + 1; });
     });
   }
@@ -743,12 +812,13 @@ export function phoneView(S, id, now){
   return {
     t: 'st', phase: S.phase, kid: p.kid ? 1 : 0,
     play: pushView(S, 'play', now, p), dpush: pushView(S, 'drive', now, p),
-    can: {play: canPush(S, 'play', id), drive: canPush(S, 'drive', id)},
+    can: {play: canPush(S, 'play', id), drive: canPush(S, 'drive', id), skip: !p.kid},
     me: {n: p.name, s: p.score, st: p.streak, best: p.best, rank: me ? me.rank : 0, of: b.length, right: p.right, calls: p.calls},
     // every guess settled, newest last: calls and drives
     tickets: p.tickets.slice(-30).map(t => t.drive ? {drive: t.drive, res: t.res, pts: t.pts, line: t.line, at: t.at, mine: t.mine, ans: t.ans, got: t.got} :
-      {v: t.v, res: t.res, pts: t.pts, line: t.line, at: t.at, big: t.big, bigHit: t.bigHit, few: t.few, streak: t.streak, sit: t.sit, kind: t.kind}),
-    rec: {calls: [p.right, p.calls], big: [p.bigs, p.bigTried || 0], rv: [p.reviews, p.rvTried || 0], tv: [p.tvRight, p.tvTried || 0],
+      {v: t.v, res: t.res, pts: t.pts, line: t.line, at: t.at, big: t.big, bigHit: t.bigHit, to: t.to, toHit: t.toHit, few: t.few, streak: t.streak, sit: t.sit, kind: t.kind, ans: t.ans}),
+    rec: {calls: [p.right, p.calls], big: [p.bigs, p.bigTried || 0], to: [p.tos || 0, p.toTried || 0], kicks: p.kicks || [0, 0],
+      rv: [p.reviews, p.rvTried || 0], tv: [p.tvRight, p.tvTried || 0],
       drive: Object.fromEntries(FIELDS.map(f => [f, ds[f] || [0, 0]]))},
     sit: sitView(S, now),
     drive: driveView(S, p, now), review: reviewView(S, now, p), tv: tvView(S, now, p),

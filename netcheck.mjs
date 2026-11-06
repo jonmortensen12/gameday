@@ -71,7 +71,7 @@ try {
   ok(await tv.evaluate(() => GD.host.roomInfo().people.filter(p => p.on).length) === 3, 'the jumbotron sees three phones');
 
   // play along until the final whistle
-  let keyTested = false, rejoinTested = false, pushes = 0, locks = 0, huddle = 0;
+  let keyTested = false, rejoinTested = false, pushes = 0, locks = 0, huddle = 0, skipped = null, kickCalls = 0;
   let sawTrivia = false, sawTvOnPhone = false, flagged = false, sawReview = false, answered = 0, calls = 0;
   const t0 = Date.now();
   while(Date.now() - t0 < 560000){   // the huddles hold the replay, so this takes a while
@@ -88,6 +88,14 @@ try {
         rv: !document.getElementById('rvCard').classList.contains('hide'), rvBtns: document.querySelectorAll('#rvBtns button').length}));
       if(vis.tv){
         sawTvOnPhone = true;
+        // once, somebody has had enough trivia: ⏭, twice
+        if(skipped === null && p === phones[2].p && !huddle){
+          const n = await tv.evaluate(() => GD.host.S.tv && GD.host.S.tv.n);
+          await tap(p, '#tvSkip'); await tap(p, '#tvSkip');
+          await sleep(800);
+          skipped = await tv.evaluate(n => !!(GD.host.S.tv && GD.host.S.tv.n === n && GD.host.S.tv.state === 'done' && GD.host.S.tv.skipped), n);
+          continue;
+        }
         const n = await p.$$eval('#tvA button:not(.mine)', b => b.length);
         if(n === 4){ await tap(p, '#tvA button >> nth=' + Math.floor(Math.random() * 4)); answered++; }
         continue;
@@ -96,7 +104,17 @@ try {
       if(vis.rv && vis.rvBtns) await tap(p, '#rvBtns button >> nth=' + (Math.random() < 0.5 ? 0 : 1));
       if(vis.drive && Math.random() < 0.4) await tap(p, '#driveQs button >> nth=' + Math.floor(Math.random() * 18));
       if(Math.random() < 0.05) await tap(p, '#syncBtn');
-      if(vis.play && Math.random() < 0.8){ await tap(p, Math.random() < 0.5 ? '#runBtn' : '#passBtn'); calls++; }
+      if(vis.play && Math.random() < 0.8){
+        const r = Math.random();
+        if(r < 0.2){ await tap(p, '#modeRow button[data-m=punt]'); await tap(p, '#kickGrid button >> nth=' + Math.floor(Math.random() * 8)); kickCalls++; }
+        else if(r < 0.3){ await tap(p, '#modeRow button[data-m=fg]'); await tap(p, '#kickGrid button >> nth=' + Math.floor(Math.random() * 4)); kickCalls++; }
+        else {
+          await tap(p, '#modeRow button[data-m=rp]');
+          await tap(p, Math.random() < 0.5 ? '#runBtn' : '#passBtn');
+          if(Math.random() < 0.2) await tap(p, '#toBtn');
+          calls++;
+        }
+      }
       /* Jon asks the room. At 60x a snap goes by every half second, faster
          than anyone could answer, so the replay holds still for a moment
          while the room answers - the huddle - and then Jon locks (as if at
@@ -112,10 +130,12 @@ try {
       const open = await tv.evaluate(() => GD.host.S.pp.some(q => !q.target && !q.void));
       if(!open){
         keyTested = true;
+        await tv.evaluate(() => GD.host.source.pause());     // at 60x the play would be over before anyone looked
         await tv.keyboard.press('a');
         await sleep(1200);
         const shown = await phones[0].p.evaluate(() => !document.getElementById('snap').classList.contains('hide') && /the TV called/.test(document.getElementById('snapH').textContent));
         ok(shown, 'A on the jumbotron calls for a play, and the phones show it');
+        await tv.evaluate(() => GD.host.source.resume());
       }
     }
     // people wander off: a reload, and a phone that comes back as a stranger
@@ -168,6 +188,9 @@ try {
   ok(sawTrivia && sawTvOnPhone && answered > 0, 'trivia ran on the jumbotron and the phones (' + answered + ' answers)');
   ok(sawReview, 'a review was flagged from a phone');
   ok(keyTested && rejoinTested, 'the jumbotron-key and rejoin checks ran');
+  ok(skipped === true, '⏭ on a phone ends the trivia for everyone');
+  const K = await tv.evaluate(() => Object.values(GD.host.S.players).map(p => (p.kicks || [0, 0])[1] + (p.toTried || 0)));
+  ok(kickCalls > 0 && K.some(n => n > 0), 'field goal, punt and 💥 calls were made (' + kickCalls + ') and settled (' + K.join(', ') + ')');
   const tickets = await phones[0].p.evaluate(() => document.querySelectorAll('#tickets .tk').length);
   ok(tickets >= 2, 'a phone shows its results (' + tickets + ')');
   const sit = await phones[0].p.evaluate(() => document.getElementById('sitT').textContent);
@@ -176,7 +199,7 @@ try {
   await sleep(1500);
   const hist = await phones[2].p.evaluate(() => ({rec: document.querySelectorAll('#rec div').length, items: document.querySelectorAll('#hist .hd').length,
     drives: [...document.querySelectorAll('#hist .hd table')].length}));
-  ok(hist.rec === 9 && hist.items >= 5, 'My guesses: the record and ' + hist.items + ' settled guesses (' + hist.drives + ' drives)');
+  ok(hist.rec === 11 && hist.items >= 5, 'My guesses: the record and ' + hist.items + ' settled guesses (' + hist.drives + ' drives)');
   await tv.waitForFunction(() => document.getElementById('endOver').classList.contains('on') || document.getElementById('camWrap').classList.contains('on'), null, {timeout: 20000}).catch(() => {});
   const aw = await tv.evaluate(() => document.querySelectorAll('#awards div').length);
   ok(aw >= 3, 'the final screen has awards (' + aw + ')');
