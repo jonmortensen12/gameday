@@ -30,10 +30,17 @@ It is **slow**: a play reaches it 24–56 s after it happens (measured on SNF,
 behind the TV, so the feed can never open or close a call. Instead:
 
 - Every play carries `wallclock`, when it really happened. The TV shows it
-  at `wall + D`. **D** is measured: phones get a KICK button at the opening
-  kickoff, after scores and at halftime; when the kickoff turns up in the
-  feed, D = median tap − its wallclock. Before any tap D is a 6 s guess
-  (antenna). `[` / `]` on the jumbotron nudge it.
+  at `wall + D`. **D** is measured from taps (`measure()` in `game.js`):
+  KICK (prompted before the game, after scores, at halftime) and ⏱ (any
+  snap, any time, on every phone; Space on the jumbotron). Each tap could
+  be any play from the 2.5 minutes before it, so it offers a set of
+  possible delays; taps on different snaps (4 s apart or more) share only
+  the true one, because plays are irregularly spaced. A KICK tap can only
+  match a kickoff, so it settles D alone; a single ⏱ tap only fine-tunes a
+  D already known (within 10 s). ⏱ taps are used once 90 s old (their play
+  must be in the feed by then). Before any tap D is a 6 s guess.
+  `[` / `]` on the jumbotron nudge it. Measured 2026-11-05 on Thursday
+  Night Football: the feed ran 22-53 s behind real time (median 42).
 - Every phone action is stamped by the host when it arrives (never the
   phone's clock). A call counts for a play if it was made before
   `wall + D − 1.5 s`; the newest such call wins; later ones wait for the
@@ -53,11 +60,18 @@ behind the TV, so the feed can never open or close a call. Instead:
 - **Call the snap** — RUN / PASS, optional 🔥 big play (15+ yards). 10 pts,
   +10 if a third or fewer of the room (3+ people) called it, ×1.5 at a
   3-streak, ×2 at 5. Big play +20, or a missed big play breaks the streak.
-- **Next drive** — one question always open: how does the *next* drive end
-  (TD / FG / punt / turnover, where missed FG and downs are turnovers)? It
-  locks at that drive's first snap and the next opens. Being about the next
-  drive is what makes the feed's delay not matter. Settled from ESPN's drive
-  `result`. 25 pts.
+- **Next drive** — five questions about the next drive: how it ends (TD /
+  FG / punt / turnover, where missed FG and downs are turnovers, 25 pts),
+  plays (1-3 / 4-5 / 6-8 / 9+), yards (<10 / 10-29 / 30-59 / 60+), time of
+  possession (<1:30 / 1:30-2:30 / 2:30-4:00 / 4:00+) (15 pts each) and a
+  penalty flag yes/no (10). The buckets are the quartiles of 465 real
+  drives, so each comes up about a quarter of the time. Guesses are
+  timestamped like calls: each counts for the first drive whose first
+  snap (not its kickoff) reaches the TV after it was made, so the moment a
+  drive starts new guesses go to the one after. Settled from ESPN's drive
+  summary (`result`, `offensivePlays`, `yards`, `timeElapsed`, any play
+  with "penalty"). A drive cut off by the half or the game counts for
+  nothing.
 - **Reviews** — any phone's 🚩 (tap twice) opens a 45 s STANDS / OVERTURNED
   vote. The feed reports the ruling in the next play's text ("CALL UPHELD",
   "CALL OVERTURNED", NFL "REVERSED"); `reviewOf` reads it. Nothing after
@@ -82,6 +96,20 @@ on the jumbotron) can say the ruling the moment the referee announces it.
 The feed still checks: if its ruling turns up within 12 minutes and
 differs, the points move to the right voters and the board says "corrected
 by the feed".
+
+## What the screens show
+
+- **The situation** (phones and jumbotron): quarter, clock, who has the
+  ball, down and distance at the spot, after the newest play the TV has
+  shown. "NOW" when that play was on the TV under 25 s ago; otherwise
+  "ESPN CATCHING UP" (the TV may be a play or two ahead).
+- Every settled call carries its play's situation ("3rd & 2 at BAL 43 ·
+  Q2") and what it was.
+- Phones: **This drive** (the one going now: plays, yards and flags so far
+  against your guesses) and **Next drive** (the five questions).
+- Phones, **My guesses** tab: the record (plays, big plays, each drive
+  question, reviews, trivia) and the last 30 settled guesses, drives as a
+  you / actual table.
 
 ## The jumbotron
 
@@ -124,7 +152,7 @@ awards. **It makes no sound at all.**
 ## Phone protocol
 
 phone → host: `hello {dev, name, kid}`, `call {v: run|pass, big}`,
-`drive {v}`, `flag`, `rvote {v}`, `ref {v: stands|overturned|none}`,
+`dpick {f: res|plays|yards|time|flag, v}`, `snap` (⏱), `flag`, `rvote {v}`, `ref {v: stands|overturned|none}`,
 `kick`, `ad`, `ans {n, i}`, `fresh {dev, name, kid}` ("not me"), `bye`
 (the page closed), `ping` (every 2.5 s; 8 s silent = away).
 host → phone: `host {code, name, back: {n, s} | null}`, then `st` (the whole view for that phone, sent when it

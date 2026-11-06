@@ -90,7 +90,8 @@ try {
       }
       if(vis.kick && Math.random() < 0.3) await tap(p, '#kickBtn');
       if(vis.rv && vis.rvBtns) await tap(p, '#rvBtns button >> nth=' + (Math.random() < 0.5 ? 0 : 1));
-      if(vis.drive && Math.random() < 0.2) await tap(p, '#driveBtns button >> nth=' + Math.floor(Math.random() * 4));
+      if(vis.drive && Math.random() < 0.2) await tap(p, '#driveQs button >> nth=' + Math.floor(Math.random() * 18));
+      if(Math.random() < 0.05) await tap(p, '#syncBtn');
       if(Math.random() < 0.5){ await tap(p, Math.random() < 0.5 ? '#runBtn' : '#passBtn'); calls++; }
     }
     // drives only, switched on from the jumbotron's keyboard, and back
@@ -144,6 +145,13 @@ try {
   ok(modeTested && rejoinTested, 'the mode and rejoin checks ran');
   const tickets = await phones[0].p.evaluate(() => document.querySelectorAll('#tickets .tk').length);
   ok(tickets >= 2, 'a phone shows its results (' + tickets + ')');
+  const sit = await phones[0].p.evaluate(() => document.getElementById('sitT').textContent);
+  ok(/^Q\d /.test(sit), 'the phone shows where the game is: "' + sit + '"');
+  await phones[2].p.click('#tabs button >> nth=1');
+  await sleep(1500);
+  const hist = await phones[2].p.evaluate(() => ({rec: document.querySelectorAll('#rec div').length, items: document.querySelectorAll('#hist .hd').length,
+    drives: [...document.querySelectorAll('#hist .hd table')].length}));
+  ok(hist.rec === 9 && hist.items >= 5, 'My guesses: the record and ' + hist.items + ' settled guesses (' + hist.drives + ' drives)');
   await tv.waitForFunction(() => document.getElementById('endOver').classList.contains('on') || document.getElementById('camWrap').classList.contains('on'), null, {timeout: 20000}).catch(() => {});
   const aw = await tv.evaluate(() => document.querySelectorAll('#awards div').length);
   ok(aw >= 3, 'the final screen has awards (' + aw + ')');

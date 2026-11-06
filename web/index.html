@@ -48,6 +48,12 @@ body.quiet #board { opacity: 0.62; }
 .tm .sw { width: 14px; height: 40px; border-radius: 4px; }
 .tm .pts { font-size: 44px; font-variant-numeric: tabular-nums; min-width: 56px; text-align: right; }
 #detail { color: var(--dim); font-size: 18px; }
+#sit { font-size: 24px; font-weight: 700; display: flex; align-items: center; gap: 12px; }
+#sit b { color: var(--gold); font-variant-numeric: tabular-nums; }
+#sit .bd { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; padding: 4px 10px; border-radius: 999px; }
+#sit .bd.now { background: #0f6b45; } #sit .bd.lag { background: #5a4500; }
+#cur { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-size: 20px; }
+#cur b { font-size: 26px; }
 #feedDot { margin-left: auto; font-size: 14px; color: var(--dim); display: flex; align-items: center; gap: 8px; }
 #feedDot i { width: 10px; height: 10px; border-radius: 50%; background: #555; display: inline-block; }
 #feedDot.ok i { background: var(--good); } #feedDot.down i { background: var(--bad); }
@@ -170,6 +176,7 @@ body.drives #drive .opts b { font-size: 64px; }
   <div id="scorebug" class="panel">
     <div class="tm"><div class="sw" id="usSw"></div><span id="usN">BYU</span><span class="pts" id="usS">0</span></div>
     <div class="tm"><div class="sw" id="themSw"></div><span id="themN">UTAH</span><span class="pts" id="themS">0</span></div>
+    <div id="sit"></div>
     <div id="detail"></div>
     <div id="feedDot"><i></i><span>feed</span></div>
   </div>
@@ -197,6 +204,7 @@ body.drives #drive .opts b { font-size: 64px; }
       <div id="last"><span class="no">Waiting for kickoff.</span></div>
     </div>
     <div id="drive" class="panel">
+      <div id="cur" class="hide"></div>
       <div class="lbl" id="driveL">Next drive</div>
       <div class="opts" id="driveO"></div>
       <div id="driveLast"></div>
@@ -250,6 +258,7 @@ body.drives #drive .opts b { font-size: 64px; }
   <kbd>C</kbd> Cougar Cam now · <kbd>R</kbd> pretend the room just went off<br>
   <kbd>T</kbd> trivia round now · <kbd>V</kbd> play the reaction reel<br>
   <kbd>M</kbd> every play / drives only<br>
+  <kbd>Space</kbd> at a snap on the TV: sync the delay<br>
   <kbd>X</kbd> start a review · <kbd>1</kbd> it stands · <kbd>2</kbd> overturned<br>
   <kbd>[</kbd> <kbd>]</kbd> TV delay -1 s / +1 s<br>
   <kbd>P</kbd> pause a rehearsal · <kbd>→</kbd> skip it 30 s<br>
@@ -404,12 +413,15 @@ function render(v, S, now){
   if(v.score){
     $('usN').textContent = v.score.us.abbr; $('usS').textContent = v.score.us.s; $('usSw').style.background = v.score.us.c;
     $('themN').textContent = v.score.them.abbr || ''; $('themS').textContent = v.score.them.s; $('themSw').style.background = v.score.them.c;
-    $('detail').textContent = v.score.state === 'pre' ? 'Kickoff soon' : v.score.state === 'post' ? 'Final' : (v.score.detail ? v.score.detail + ' · from the feed' : '');
+    $('detail').textContent = v.score.state === 'pre' ? 'Kickoff soon' : v.score.state === 'post' ? 'Final' : '';
+    const x = v.sit;
+    $('sit').innerHTML = x ? 'Q' + x.q + ' <b>' + esc(x.clock) + '</b> · ' + (x.team ? esc(x.team) + ' ball · ' : '') + esc(x.text || '') +
+      ' <span class="bd ' + (x.fresh ? 'now' : 'lag') + '">' + (x.fresh ? 'NOW' : 'ESPN CATCHING UP') + '</span>' : '';
   }
   document.body.classList.toggle('drives', v.mode === 'drives');
   $('modeChip').textContent = v.mode === 'drives' ? 'Mode: drives only' : 'Mode: every play';
   const lastDrive = v.log.filter(l => l.k === 'drive').pop();
-  $('driveLast').textContent = lastDrive ? 'Last: ' + lastDrive.line : '';
+  $('driveLast').textContent = v.lastDrive ? 'Last: ' + v.lastDrive : '';
   // the room
   $('rocN').textContent = v.rocN ? v.roc + '%' : '-';
   $('rocF').style.width = (v.rocN ? v.roc : 0) + '%';
@@ -425,8 +437,16 @@ function render(v, S, now){
   const d = v.drive;
   if(d){
     $('drive').classList.remove('hide');
-    $('driveL').textContent = (d.first ? 'First drive' : (d.team ? d.team + '\'s next drive' : 'Next drive')) + ' · how does it end?';
-    $('driveO').innerHTML = ['td', 'fg', 'punt', 'turnover'].map(k => '<div><b>' + (d.tally[k] || 0) + '</b>' + DRIVE_LABEL[k] + '</div>').join('');
+    const c = d.cur;
+    $('cur').classList.toggle('hide', !c);
+    if(c){
+      const t = c.tally || {}, picks = Object.entries(t).sort((a, b) => b[1] - a[1]).map(([k, n]) => n + ' ' + DRIVE_LABEL[k]).join(' · ');
+      $('cur').innerHTML = 'Now: <b>' + esc(c.team) + ' drive</b> · ' + (c.live ? c.live.plays + ' plays, ' + c.live.yards + ' yds' + (c.live.flag ? ', 🚩' : '') + ' so far' : 'just started') +
+        '<div class="note">' + (picks ? 'The room said: ' + esc(picks) : 'Nobody guessed this one') + '</div>';
+    }
+    $('driveL').textContent = 'Next drive' + (d.next.team ? ' (' + d.next.team + ')' : '') + ' · guess on your phone, locks when it starts';
+    const tl = d.next.tally.res || {};
+    $('driveO').innerHTML = ['td', 'fg', 'punt', 'turnover'].map(k => '<div><b>' + (tl[k] || 0) + '</b>' + DRIVE_LABEL[k] + '</div>').join('');
   } else $('drive').classList.add('hide');
   // kickoff
   $('kickBox').classList.toggle('hide', !v.kick);
@@ -611,6 +631,7 @@ addEventListener('keydown', e => {
   if(k === 'r' && cam) cam.shout();
   if(k === 't') host.trivia();
   if(k === 'm') toggleMode();
+  if(e.key === ' '){ e.preventDefault(); host.snap(); }
   if(k === 'x') host.flag();
   if(k === '1') host.act('_tv', {t: 'ref', v: 'stands'});
   if(k === '2') host.act('_tv', {t: 'ref', v: 'overturned'});

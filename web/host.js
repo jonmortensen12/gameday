@@ -102,6 +102,8 @@ export function createHost(opts){
       case 'rvote': G.reviewVote(S, id, now, d.v); break;
       case 'ref': G.refSaid(S, id, now, d.v); break;
       case 'kick': G.kick(S, id, now); break;
+      case 'snap': G.snap(S, id, now); break;
+      case 'dpick': G.drivePick(S, id, now, String(d.f), String(d.v)); break;
       case 'ad': G.ad(S, id, now); break;
       case 'ans': G.answer(S, id, now, d.n | 0, d.i | 0); break;
       case 'kid': if(S.players[id]) S.players[id].kid = !!d.v; break;
@@ -177,6 +179,7 @@ export function createHost(opts){
     /* the jumbotron's own keys */
     setMode(m){ G.setMode(S, m, src.now()); persist(); },
     flag(){ G.flag(S, '_tv', src.now()); },
+    snap(){ G.snap(S, '_tv', src.now()); },
     nudgeD(ms){ S.D += ms; S.dTaps = S.dTaps.map(x => x + ms); },
     trivia(){ G.ad(S, '_', src.now()); },
     reset(){ S = G.create(cfg); persist(); info(); },

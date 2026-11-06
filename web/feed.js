@@ -129,8 +129,13 @@ export function normalize(d){
   const list = (ds.previous || []).slice();
   if(ds.current && !list.some(x => x.id === ds.current.id)) list.push(Object.assign({current: true}, ds.current));
   list.forEach((x, di) => {
+    const te = x.timeElapsed && x.timeElapsed.displayValue;
     const dr = {id: String(x.id), team: x.team ? String(x.team.id) : '', i: di,
-      result: x.current ? null : driveResult(x.result, x.displayResult), raw: x.displayResult || x.result || '', plays: []};
+      result: x.current ? null : driveResult(x.result, x.displayResult), raw: x.displayResult || x.result || '', plays: [],
+      // ESPN's own count for the drive: offensive plays, net yards, time of possession
+      stats: {plays: +x.offensivePlays || 0, yards: +x.yards || 0,
+        secs: te && /^\d+:\d\d$/.test(te) ? +te.split(':')[0] * 60 + +te.split(':')[1] : null,
+        flag: (x.plays || []).some(p => /penalty/i.test(p.text || '') || /penalty/i.test((p.type && p.type.text) || ''))}};
     drives.push(dr);
     (x.plays || []).forEach(p => {
       const type = (p.type && p.type.text) || '';
@@ -141,6 +146,8 @@ export function normalize(d){
         period: (p.period && p.period.number) || 0, clock: (p.clock && p.clock.displayValue) || '',
         wall: ms(p.wallclock), off, to: (e.team && String(e.team.id)) || off, kind,
         down: s.down || 0, dist: s.distance || 0, spot: s.possessionText || '',
+        sit: s.downDistanceText || '',                 // "3rd & 2 at BAL 43": the situation this play was snapped in
+        nx: e.down ? {down: e.down, dist: e.distance || 0, spot: e.possessionText || '', text: e.downDistanceText || '', team: e.team ? String(e.team.id) : ''} : null,
         yards: +p.statYardage || 0, td: /touchdown/i.test(type) || /touchdown/i.test(p.text || ''),
         scoring: !!p.scoringPlay, turnover: !!p.isTurnover || /turnover on downs/i.test(p.text || ''),
         review: reviewOf(p.text), home: +p.homeScore || 0, away: +p.awayScore || 0});
@@ -174,9 +181,15 @@ export function slice(N, cut){
   const have = new Set(plays.map(p => p.drive));
   const last = plays[plays.length - 1];
   const all = plays.length === N.plays.length;
-  const drives = N.drives.filter(d => have.has(d.id)).map((d, i, arr) => Object.assign({}, d,
-    {plays: d.plays.filter(id => plays.some(p => p.id === id)),
-     result: (i < arr.length - 1 || all) ? d.result : null}));
+  const drives = N.drives.filter(d => have.has(d.id)).map((d, i, arr) => {
+    const done = i < arr.length - 1 || all;
+    const mine = plays.filter(p => p.drive === d.id);
+    // a drive still going shows what has happened so far, as the live feed would
+    const stats = done ? d.stats : {plays: mine.filter(p => p.kind === 'run' || p.kind === 'pass').length,
+      yards: mine.filter(p => p.kind === 'run' || p.kind === 'pass').reduce((a, p) => a + p.yards, 0), secs: null,
+      flag: mine.some(p => /penalty/i.test(p.text) || /penalty/i.test(p.type))};
+    return Object.assign({}, d, {plays: mine.map(p => p.id), result: done ? d.result : null, stats});
+  });
   const teams = JSON.parse(JSON.stringify(N.teams));
   if(N.homeId && teams[N.homeId]) teams[N.homeId].score = last ? last.home : 0;
   if(N.awayId && teams[N.awayId]) teams[N.awayId].score = last ? last.away : 0;

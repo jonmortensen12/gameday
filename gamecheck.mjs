@@ -11,7 +11,13 @@
                 guessing)
      coin     - calls at random
      tapper   - taps KICK at every kickoff, the moment the TV shows it
-     driver   - votes the right ending for every drive as the question opens
+     driver   - 20 s after each drive starts on the TV, guesses everything
+                about the NEXT drive right (how it ends, plays, yards, time,
+                a flag)
+     latecomer- guesses the drive that has just started, a few seconds
+                into it (must land on the drive after, so mostly wrong)
+     snapper  - (sync: 'snaps') never taps KICK, taps ⏱ at a third of the
+                snaps instead
      flagger  - flags every review and votes the right ruling
      kid      - in kids' mode, answers trivia at random
 
@@ -35,7 +41,7 @@ async function run(file, team, Dtrue, label, opts = {}){
   await src.ready;
   let SS = G.create({team, seed: 7, mode: opts.mode});
   const S0 = SS;
-  const ids = ['oracle', 'cheater', 'coin', 'tapper', 'driver', 'flagger', 'kid'];
+  const ids = ['oracle', 'cheater', 'coin', 'tapper', 'driver', 'latecomer', 'snapper', 'flagger', 'kid'];
   ids.forEach(id => G.join(SS, id, id, id === 'kid'));
   const tvOf = p => p.wall + Dtrue;
   // a play with a wrong wallclock in the feed is never scored (feed.js), and
@@ -51,7 +57,20 @@ async function run(file, team, Dtrue, label, opts = {}){
     events.push({t: tvOf(p) + 2000, f: () => G.call(SS, 'cheater', src.now(), p.kind, false)});
     events.push({t: tvOf(p) - 10000, f: () => G.call(SS, 'coin', src.now(), Math.random() < 0.5 ? 'run' : 'pass', false)});
   });
-  kicks.forEach(p => events.push({t: tvOf(p) + (Math.random() - 0.5) * 800, f: () => G.kick(SS, 'tapper', src.now())}));
+  if(opts.sync !== 'snaps') kicks.forEach(p => events.push({t: tvOf(p) + (Math.random() - 0.5) * 800, f: () => G.kick(SS, 'tapper', src.now())}));
+  else calls.forEach((p, i) => { if(i % 3 === 1) events.push({t: tvOf(p) + (Math.random() - 0.5) * 800, f: () => G.snap(SS, 'snapper', src.now())}); });
+  // drives: when each starts on the TV, and the true answers
+  const real = N.drives.map(d => {
+    const first = N.plays.find(p => p.drive === d.id && (p.kind === 'run' || p.kind === 'pass' || p.kind === 'special') && !p.badWall);
+    return first && {d, start: tvOf(first)};
+  }).filter(Boolean);
+  const answers = d => Object.fromEntries(Object.keys(G.DRIVE_Q).map(f => [f, f === 'res' ? d.result : G.DRIVE_Q[f].of(d.stats)]));
+  real.forEach((r, i) => {
+    const next = real[i + 1];
+    if(next && next.d.result && next.d.result !== 'void' && next.start - r.start > 25000)
+      events.push({t: r.start + 20000, f: () => Object.entries(answers(next.d)).forEach(([f, v]) => v != null && G.drivePick(SS, 'driver', src.now(), f, v))});
+    if(r.d.result && r.d.result !== 'void') events.push({t: r.start + 3000, f: () => G.drivePick(SS, 'latecomer', src.now(), 'res', r.d.result)});
+  });
   reviews.forEach(r => {
     events.push({t: tvOf(r.at) + 15000, f: () => G.flag(SS, 'flagger', src.now())});
     events.push({t: tvOf(r.at) + 25000, f: () => G.reviewVote(SS, 'flagger', src.now(), r.v)});
@@ -72,14 +91,6 @@ async function run(file, team, Dtrue, label, opts = {}){
     while(ei < events.length && events[ei].t <= now) events[ei++].f();
     if(now >= nextPoll){ G.feed(SS, await src.poll(), now); nextPoll = now + 3000; }
     G.tick(SS, now);
-    // the driver votes the real ending of whatever drive the question is about
-    const q = SS.dq;
-    if(q && !q.votes.driver && !driveSeen[q.n]){
-      driveSeen[q.n] = 1;
-      const idx = q.after ? N.drives.findIndex(d => d.id === q.after) : -1;
-      const d = N.drives[idx + 1];
-      if(d && d.result && d.result !== 'void') G.driveVote(SS, 'driver', now, d.result);
-    }
     // trivia: the oracle reads the answer, the kid guesses
     const r = SS.tv;
     if(r && r.state === 'ask'){
@@ -101,7 +112,7 @@ async function run(file, team, Dtrue, label, opts = {}){
   console.log('  ' + calls.length + ' plays to call (' + runs + ' runs), ' + kicks.length + ' kickoffs, ' + N.drives.length + ' drives, ' + reviews.length + ' reviews');
   if(opts.mode === 'drives'){
     ok(Object.values(P).every(p => p.calls === 0), 'drives only: no play calls are taken');
-    ok(P.driver.drives >= N.drives.filter(d => d.result && d.result !== 'void').length * 0.8, 'drives only: drive questions settle (' + P.driver.drives + ')');
+    ok(P.driver.drives >= real.length * 0.7, 'drives only: drive questions settle (' + P.driver.drives + ')');
     ok(SS.phase === 'final' && rounds >= 4, 'drives only: trivia and the game still run (' + rounds + ' rounds)');
     return;
   }
@@ -111,15 +122,19 @@ async function run(file, team, Dtrue, label, opts = {}){
     ok(acc('oracle') > 0.97, 'and the first half still scored right: ' + Math.round(100 * acc('oracle')) + '%');
     return;
   }
-  ok(Math.abs(SS.D - Dtrue) < 1500, 'D measured from kickoff taps: ' + (SS.D / 1000).toFixed(1) + ' s (true ' + Dtrue / 1000 + ')');
+  ok(Math.abs(SS.D - Dtrue) < 1500, 'D measured from ' + (opts.sync === 'snaps' ? 'snap taps alone' : 'kickoff taps') + ': ' + (SS.D / 1000).toFixed(1) + ' s (true ' + Dtrue / 1000 + ')');
   ok(P.oracle.calls >= calls.length * 0.9, 'every play got the oracle\'s call settled: ' + P.oracle.calls + ' of ' + calls.length);
   ok(acc('oracle') > 0.97, 'calls made before the snap score: oracle ' + Math.round(100 * acc('oracle')) + '%');
   ok(acc('cheater') < 0.75, 'calls made after the snap do not: cheater ' + Math.round(100 * acc('cheater')) + '% (guessing is ~' + Math.round(100 * Math.max(runs, calls.length - runs) / calls.length) + '%)');
   ok(acc('coin') > 0.3 && acc('coin') < 0.7, 'a coin is a coin: ' + Math.round(100 * acc('coin')) + '%');
   ok(P.oracle.score > P.cheater.score && P.cheater.score > 0, 'oracle ' + P.oracle.score + ' > cheater ' + P.cheater.score + ' > 0');
-  const settled = SS.dqPast.length ? null : 0;
-  const dr = P.driver.drives, counted = N.drives.filter(d => d.result && d.result !== 'void').length;
-  ok(dr >= counted * 0.8, 'drive questions settle: driver right on ' + dr + ' of ' + counted + ' drives');
+  const counted = real.filter((r, i) => i > 0 && r.d.result && r.d.result !== 'void' && r.start - real[i - 1].start > 25000).length;
+  const dst = P.driver.dstat || {};
+  const fieldsOk = Object.keys(G.DRIVE_Q).every(f => dst[f] && dst[f][0] === dst[f][1] && dst[f][1] >= counted * 0.9);
+  ok(P.driver.drives >= counted * 0.9, 'next-drive guesses made during a drive count for the next one: driver right on ' + P.driver.drives + ' of ' + counted);
+  ok(fieldsOk, 'every drive question settles right: ' + Object.entries(dst).map(([f, x]) => f + ' ' + x[0] + '/' + x[1]).join(', '));
+  const late = P.latecomer.dstat && P.latecomer.dstat.res || [0, 0];
+  ok(late[1] > 0 && late[0] / late[1] < 0.6, 'a guess made after a drive started goes to the next one: latecomer ' + late[0] + '/' + late[1]);
   ok(rounds >= 4, 'trivia rounds in breaks: ' + rounds);
   ok(halfRound, 'a halftime round');
   if(reviews.length){
@@ -129,7 +144,7 @@ async function run(file, team, Dtrue, label, opts = {}){
   ok(P.oracle.tvRight > 0 && P.kid.score > 0, 'trivia scores: oracle ' + P.oracle.tvRight + ' right, kid ' + P.kid.score + ' pts');
   ok(SS.phase === 'final', 'the game ends: ' + SS.phase);
   ok(reloads === 1, 'survived a reload at halftime');
-  ok(maxPhone < 6000 && maxJumbo < 9000, 'messages stay small: phone ' + maxPhone + ' B, jumbotron ' + maxJumbo + ' B');
+  ok(maxPhone < 14000 && maxJumbo < 9000, 'messages stay small: phone ' + maxPhone + ' B, jumbotron ' + maxJumbo + ' B');
   const aw = G.awards(SS);
   ok(aw.length >= 4, 'awards: ' + aw.map(a => a.t + ' ' + a.n).join(', '));
 }
@@ -169,6 +184,7 @@ await run('utah-isu-2026.json', '254', 5000, 'Utah at Iowa State (2026): three r
 await run('utah-isu-2026.json', '254', 5000, 'The same, the room calling the rulings - wrongly', {room: 'wrong'});
 await run('nfl-phi-wsh-2026.json', '21', 30000, 'NFL: Eagles at Commanders (2026), streamed', {league: 'nfl'});
 await run('byu-utah-2025.json', '252', 8000, 'Drives only', {mode: 'drives'});
+await run('byu-utah-2025.json', '252', 40000, 'Synced from snaps alone (no KICK taps), streamed', {sync: 'snaps'});
 await run('byu-utah-2025.json', '252', 8000, 'Every play, switched to drives only at halftime', {switchAtHalf: 'drives'});
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall good');

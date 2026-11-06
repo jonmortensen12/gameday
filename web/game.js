@@ -20,10 +20,14 @@
    play's snap appeared on the TV. Anything after the snap waits for the
    next play: no cheating possible, no referee needed.
 
-   DRIVES. One question is always open: how does the NEXT drive end? It
-   locks at that drive's first snap and the next one opens straight away.
-   Being about the next drive rather than this one is what makes the feed's
-   delay not matter.
+   DRIVES. Guesses about "the next drive" - how it ends, how many plays,
+   yards, time, whether a flag flies - are timestamped like calls. Each
+   counts for the first drive that starts on the TV after it was made: the
+   moment a drive starts, new guesses are already for the one after it.
+
+   SYNC. Any tap of ⏱ at a snap, or KICK at a kickoff, is matched against
+   the feed's play times; taps from different snaps agree on one delay and
+   the wrong matches do not (plays are 20-60 s apart, irregularly).
 
    REVIEWS. The feed only says what the ruling was, on the play after. So
    the room starts a review (any phone's flag), votes for 45 seconds, and
@@ -49,9 +53,23 @@ export const T = {
   bigYards: 15,
   ticketsKept: 4,
 };
-export const PTS = {call: 10, minority: 10, big: 20, drive: 25, review: 40, flag: 5, trivia: 15, speed: 5};
+export const PTS = {call: 10, minority: 10, big: 20, drive: 25, bucket: 15, dflag: 10, review: 40, flag: 5, trivia: 15, speed: 5};
 const DRIVE_OPTS = ['td', 'fg', 'punt', 'turnover'];
 export const DRIVE_LABEL = {td: 'Touchdown', fg: 'Field goal', punt: 'Punt', turnover: 'Turnover', void: 'No result'};
+/* What else to guess about a drive, in buckets that each come up about a
+   quarter of the time (465 real drives, 2025-26: plays 3/5/8, yards
+   7/27/66, time 1:19/2:14/3:59 at the quartiles; a flag on 43%). */
+export const DRIVE_Q = {
+  res: {label: 'How it ends', opts: DRIVE_OPTS, names: DRIVE_LABEL, pts: PTS.drive},
+  plays: {label: 'Plays', opts: ['p1', 'p4', 'p6', 'p9'], names: {p1: '1-3', p4: '4-5', p6: '6-8', p9: '9+'}, pts: PTS.bucket,
+    of: st => st.plays <= 3 ? 'p1' : st.plays <= 5 ? 'p4' : st.plays <= 8 ? 'p6' : 'p9'},
+  yards: {label: 'Yards', opts: ['y0', 'y10', 'y30', 'y60'], names: {y0: 'Under 10', y10: '10-29', y30: '30-59', y60: '60+'}, pts: PTS.bucket,
+    of: st => st.yards < 10 ? 'y0' : st.yards < 30 ? 'y10' : st.yards < 60 ? 'y30' : 'y60'},
+  time: {label: 'Time', opts: ['t0', 't90', 't150', 't240'], names: {t0: 'Under 1:30', t90: '1:30-2:30', t150: '2:30-4:00', t240: '4:00+'}, pts: PTS.bucket,
+    of: st => st.secs == null ? null : st.secs < 90 ? 't0' : st.secs < 150 ? 't90' : st.secs < 240 ? 't150' : 't240'},
+  flag: {label: 'A flag?', opts: ['yes', 'no'], names: {yes: '🚩 Yes', no: 'No'}, pts: PTS.dflag, of: st => st.flag ? 'yes' : 'no'},
+};
+const FIELDS = Object.keys(DRIVE_Q);
 
 function rng(s){ return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 function median(a){ const b = a.slice().sort((x, y) => x - y); return b.length ? b[b.length >> 1] : 0; }
@@ -69,7 +87,8 @@ export function create(cfg = {}){
     last: 0,                                // TV time of the newest processed play
     teams: {}, status: {state: 'pre', period: 0}, phase: 'pre',
     drives: [],                             // [{id, team}] in feed order
-    dq: null, dqN: 0, dqPast: [],           // the drive question
+    dvs: [], dvN: 0, cur: null,             // drives started on the TV, with everybody's guesses; the one going now
+    sync: {taps: [], used: 0},              // ⏱ and KICK taps, for the TV delay
     rv: null, rvN: 0, rvKnown: {},          // the review
     tv: null, tvN: 0, tvUsed: [], tvLast: -1e15, adLast: -1e15,   // trivia
     kick: {open: true, why: 'start', taps: []},
@@ -125,7 +144,7 @@ export function join(S, id, name, kid){
   return p;
 }
 function pts(S, p, n, why){ p.score += n; return n; }
-function ticket(p, t){ p.tickets.push(t); if(p.tickets.length > 12) p.tickets.splice(0, p.tickets.length - 12); }
+function ticket(p, t){ p.tickets.push(t); if(p.tickets.length > 40) p.tickets.splice(0, p.tickets.length - 40); }
 
 /* ---------- what phones do ---------- */
 export function call(S, id, now, v, big){
@@ -136,11 +155,15 @@ export function call(S, id, now, v, big){
   p.lastCall = {t: now, v, big: !!big};
 }
 
-export function driveVote(S, id, now, v){
-  const p = S.players[id], q = S.dq;
-  if(!p || !q || q.locked || DRIVE_OPTS.indexOf(v) < 0) return;
-  q.votes[id] = {v, t: now};
+/* A guess about the next drive: one field at a time, stamped. */
+export function drivePick(S, id, now, f, v){
+  const p = S.players[id], q = DRIVE_Q[f];
+  if(!p || !q || q.opts.indexOf(v) < 0 || S.phase === 'final') return;
+  p.dp = p.dp || {};
+  (p.dp[f] = p.dp[f] || []).push({t: now, v});
+  if(p.dp[f].length > 8) p.dp[f].shift();
 }
+export const driveVote = (S, id, now, v) => drivePick(S, id, now, 'res', v);
 
 export function flag(S, id, now){
   const p = S.players[id] || (id === '_tv' ? {name: 'the TV'} : null);
@@ -167,10 +190,17 @@ export function refSaid(S, id, now, v){
   if(v === 'stands' || v === 'overturned') settleReview(S, v, now, 'room');
 }
 
-export function kick(S, id, now){
-  if(!S.players[id] || !S.kick.open) return;
-  if(S.kick.taps.some(k => k.id === id && now - k.t < 20 * SEC)) return;
-  S.kick.taps.push({id, t: now});
+/* KICK at a kickoff, ⏱ at any snap: when the TV showed the ball being
+   put in play. */
+export function kick(S, id, now){ syncTap(S, id, now, 'kick'); }
+export function snap(S, id, now){ syncTap(S, id, now, 'snap'); }
+function syncTap(S, id, now, k){
+  if(!S.players[id] && id !== '_tv') return;        // '_tv': the space bar on the jumbotron
+  const mine = S.sync.taps.filter(x => x.id === id);
+  if(mine.length && now - mine[mine.length - 1].t < 8 * SEC) return;
+  S.sync.taps.push({id, t: now, k});
+  if(k === 'kick'){ S.kick.taps.push({id, t: now}); if(S.kick.taps.length > 40) S.kick.taps.shift(); }
+  if(S.sync.taps.length > 80) S.sync.taps.splice(0, S.sync.taps.length - 80);
 }
 
 export function ad(S, id, now){
@@ -233,6 +263,7 @@ function stepRound(S, now){
         const p = S.players[id];
         if(!p) return;
         const Q = r.qs[a.k][r.i];
+        p.tvTried = (p.tvTried || 0) + 1;
         if(Q && a.i === Q.c){
           const quick = Math.max(0, 1 - (a.t - r.qAt) / T.qTime);
           const got = pts(S, p, PTS.trivia + Math.round(PTS.speed * quick));
@@ -260,6 +291,7 @@ function settleReview(S, v, now, how){
   S.log.push({k: 'ruling', at: now, v});
 }
 function award(S, r, v, sign){
+  if(sign > 0 && !r.counted){ r.counted = true; Object.keys(r.votes).forEach(id => { const p = S.players[id]; if(p) p.rvTried = (p.rvTried || 0) + 1; }); }
   Object.entries(r.votes).forEach(([id, x]) => {
     const p = S.players[id];
     if(!p || x.v !== v) return;
@@ -298,10 +330,11 @@ function settleCall(S, P, now){
   const tally = {run: share.run, pass: share.pass, kind: P.kind, line, right: 0, at: now, id: P.id};
   ids.forEach(id => {
     const p = S.players[id], c = used[id];
-    const t = {play: P.id, v: c.v, big: c.big, line, at: now, pts: 0};
+    const t = {play: P.id, v: c.v, big: c.big, line, at: now, pts: 0, sit: (P.sit ? P.sit + ' · ' : '') + 'Q' + P.period, kind: P.kind};
     if(!isCall){ t.res = 'none'; ticket(p, t); return; }
     p.calls++;
     const ok = c.v === P.kind;
+    if(c.big) p.bigTried = (p.bigTried || 0) + 1;
     rocPush(S, ok);
     if(ok){
       p.right++; p.streak++; p.best = Math.max(p.best, p.streak);
@@ -332,82 +365,127 @@ export function playLine(S, P){
   return (t ? t.abbr + ': ' : '') + s;
 }
 
-/* The drive question: open on the drive after `after` (a drive id, or null
-   for the first one of the game). */
-function openDrive(S, after, now){
-  const idx = after ? S.drives.findIndex(d => d.id === after) : -1;
-  const prev = idx >= 0 ? S.drives[idx] : null;
-  const other = prev ? Object.keys(S.teams).find(k => k !== prev.team) : null;
-  S.dq = {n: ++S.dqN, after, target: null, team: other, at: now, votes: {}, locked: false, lockAt: null};
-}
-function driveFor(S, q){
-  if(q.target) return S.drives.find(d => d.id === q.target);
-  const idx = q.after ? S.drives.findIndex(d => d.id === q.after) : -1;
-  if(q.after && idx < 0) return null;
-  return S.drives[idx + 1] || null;
-}
-function stepDrive(S, N, now){
-  const q = S.dq;
-  if(!q){ if(S.phase !== 'final') openDrive(S, null, now); return; }
-  const d = driveFor(S, q);
-  if(!d) return;
-  q.target = d.id; q.team = d.team;
-  if(!q.locked){
-    // locks at the drive's first real snap (its kickoff does not count)
-    const first = N.plays.find(p => p.drive === d.id && (p.kind === 'run' || p.kind === 'pass' || p.kind === 'special'));
-    if(!first || tvTime(S, first) > now) return;     // not on the TV yet
-    q.locked = true; q.lockAt = tvTime(S, first) - T.margin;
-    Object.keys(q.votes).forEach(id => { if(q.votes[id].t > q.lockAt) q.votes[id].late = true; });
-    S.dqPast.push(q);
-    if(S.dqPast.length > 6) S.dqPast.shift();
-    openDrive(S, d.id, now);
-  }
-}
-function settleDrives(S, N, now){
-  S.dqPast.forEach(q => {
-    if(q.result) return;
-    const d = N.drives.find(x => x.id === q.target);
-    if(!d || !d.result) return;
-    q.result = d.result; q.doneAt = now;
-    const team = S.teams[d.team];
-    q.line = (team ? team.name + ' drive: ' : 'Drive: ') + (d.raw || DRIVE_LABEL[d.result]);
-    if(d.result === 'void') return;
-    Object.entries(q.votes).forEach(([id, x]) => {
-      const p = S.players[id];
-      if(!p || x.late) return;
-      if(x.v === q.result){ pts(S, p, PTS.drive); p.drives++; ticket(p, {drive: q.n, v: x.v, res: 'right', pts: PTS.drive, line: q.line, at: now}); }
-      else ticket(p, {drive: q.n, v: x.v, res: 'wrong', pts: 0, line: q.line, at: now});
-    });
-    S.log.push({k: 'drive', at: now, line: q.line, result: q.result});
-  });
+/* The KICK prompt: open before the game, after a score and at halftime.
+   It closes 10 s after the first tap, or once a kickoff is in the feed and
+   2.5 minutes old - by then even a slow stream has shown it. */
+function openKick(S, why, now){ S.kick = {open: true, why, since: now - 60 * SEC, taps: S.kick.taps || []}; }
+function stepKick(S, N, now){
+  const k = S.kick;
+  if(!k.open) return;
+  const tap = k.taps.find(x => x.t >= (k.since || -Infinity));
+  const ko = N && N.plays.find(p => p.kind === 'kickoff' && !p.badWall && p.wall >= (k.since || -Infinity) - S.D);
+  if((tap && now - tap.t > 10 * SEC) || (ko && now > ko.wall + 150 * SEC)) k.open = false;
 }
 
-/* A kickoff is in the feed and the prompt was open: wait for the taps
-   (over a streaming app the feed can be ahead of the TV, so they may not
-   have happened yet), then measure from all of them three seconds after
-   the first. */
-function stepKick(S, now){
-  const k = S.kick, P = k.pending;
-  if(!P) return;
-  const taps = k.taps.filter(x => x.t >= P.wall - 20 * SEC && x.t <= P.until);
-  if(taps.length ? now - taps[0].t >= 3 * SEC : now > P.until) measureKick(S, P, now);
+/* ---------- drives ---------- */
+/* A drive's first snap reached the TV: everybody's newest guess for each
+   question, made before that snap, is theirs for this drive; anything made
+   after it waits for the next. */
+function startDrive(S, P, now){
+  const lockAt = tvTime(S, P) - T.margin;
+  const dv = {n: ++S.dvN, id: P.drive, team: P.off, lockAt, at: now, picks: {}, result: null};
+  Object.values(S.players).forEach(p => {
+    if(!p.dp) return;
+    const mine = {};
+    FIELDS.forEach(f => {
+      const list = p.dp[f] || [];
+      const before = list.filter(x => x.t <= lockAt);
+      if(before.length) mine[f] = before[before.length - 1].v;
+      p.dp[f] = list.filter(x => x.t > lockAt);
+    });
+    if(Object.keys(mine).length) dv.picks[p.id] = mine;
+  });
+  S.dvs.push(dv);
+  if(S.dvs.length > 10) S.dvs.shift();
+  S.cur = dv;
 }
-function measureKick(S, P, now){
-  const k = S.kick;
-  const lo = P.wall - 20 * SEC, hi = P.until;
-  const taps = k.taps.filter(x => x.t >= lo && x.t <= hi);
-  k.pending = null;
-  if(taps.length){
-    const firsts = {};
-    taps.forEach(x => { if(!(x.id in firsts)) firsts[x.id] = x.t; });
-    const sample = median(Object.values(firsts)) - P.wall;
-    S.dTaps.push(sample);
-    if(S.dTaps.length > 5) S.dTaps.shift();
-    S.D = median(S.dTaps);
-    S.log.push({k: 'synced', at: now, d: S.D, n: Object.keys(firsts).length});
-  }
-  k.taps = k.taps.filter(x => x.t > hi);
-  k.open = false;
+function settleDrives(S, N, now){
+  S.dvs.forEach(dv => {
+    if(dv.result) return;
+    const d = N.drives.find(x => x.id === dv.id);
+    if(!d || !d.result) return;
+    dv.result = d.result; dv.stats = d.stats; dv.doneAt = now;
+    const team = S.teams[d.team];
+    dv.line = (team ? team.name + ' drive: ' : 'Drive: ') + (d.raw || DRIVE_LABEL[d.result]) +
+      ' · ' + d.stats.plays + ' plays, ' + d.stats.yards + ' yds' + (d.stats.secs != null ? ', ' + clock(d.stats.secs) : '');
+    // what each question's answer was (the drive cut off by the half or the game counts for nothing)
+    dv.ans = {};
+    if(d.result !== 'void') FIELDS.forEach(f => { dv.ans[f] = f === 'res' ? d.result : DRIVE_Q[f].of(d.stats); });
+    Object.entries(dv.picks).forEach(([id, mine]) => {
+      const p = S.players[id];
+      if(!p) return;
+      const t = {drive: dv.n, line: dv.line, at: now, pts: 0, got: {}, mine, ans: dv.ans, res: 'none'};
+      let right = 0, tried = 0;
+      FIELDS.forEach(f => {
+        if(!(f in mine) || dv.ans[f] == null) return;
+        tried++;
+        const ok = mine[f] === dv.ans[f];
+        t.got[f] = ok ? 1 : 0;
+        p.dstat = p.dstat || {};
+        const st = p.dstat[f] = p.dstat[f] || [0, 0];
+        st[1]++;
+        if(ok){ st[0]++; right++; t.pts += pts(S, p, DRIVE_Q[f].pts); if(f === 'res') p.drives++; }
+      });
+      if(tried) t.res = right ? (right === tried ? 'right' : 'some') : 'wrong';
+      t.right = right; t.tried = tried;
+      ticket(p, t);
+    });
+    S.log.push({k: 'drive', at: now, line: dv.line, result: dv.result});
+  });
+}
+const clock = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+
+/* ---------- the TV delay, from the taps ----------
+   Each tap could be any of the plays that happened in the 2.5 minutes
+   before it (a TV is never more than that behind), so it offers a set of
+   possible delays. Taps on different snaps share only the true one: the
+   gaps between plays are irregular. A KICK tap can only be a kickoff, so it
+   settles the delay on its own; one ⏱ tap is enough to fine-tune a delay
+   already known. Taps within 4 s of each other are one moment (several
+   people tapping the same snap). A ⏱ tap is used once its play must be in
+   the feed (90 s), a KICK tap as soon as its kickoff is. */
+function measure(S, N, now){
+  const sy = S.sync;
+  const recent = sy.taps.filter(x => now - x.t < 20 * 60 * SEC);
+  if(!recent.length) return;
+  const moments = [];
+  recent.slice().sort((a, b) => a.t - b.t).forEach(x => {
+    const m = moments[moments.length - 1];
+    if(m && x.t - m.last < 4 * SEC && m.k === x.k){ m.ts.push(x.t); m.last = x.t; }
+    else moments.push({k: x.k, ts: [x.t], last: x.t});
+  });
+  const plays = N.plays.filter(p => !p.badWall && (p.kind === 'run' || p.kind === 'pass' || p.kind === 'special' || p.kind === 'kickoff'));
+  const usable = [];
+  moments.forEach(m => {
+    m.t = median(m.ts);
+    m.offs = plays.filter(p => (m.k !== 'kick' || p.kind === 'kickoff') && m.t - p.wall >= -5 * SEC && m.t - p.wall <= 150 * SEC).map(p => m.t - p.wall);
+    if(!m.offs.length) return;
+    if(m.k === 'kick' || now - m.t >= 90 * SEC) usable.push(m);
+  });
+  if(!usable.length) return;
+  const key = usable.map(m => m.t + ':' + m.offs.length).join('|');
+  if(key === sy.key) return;              // nothing new to learn
+  sy.key = key;
+  const known = S.dTaps.length > 0;
+  let best = null;
+  usable.forEach(m => m.offs.forEach(c => {
+    let w = 0;
+    const hits = [];
+    usable.forEach(o => {
+      const near = o.offs.filter(x => Math.abs(x - c) <= 2.5 * SEC).sort((a, b) => Math.abs(a - c) - Math.abs(b - c))[0];
+      if(near != null){ w += o.k === 'kick' ? 3 : 1; hits.push(near); }
+    });
+    const closer = !best || w > best.w || (w === best.w && Math.abs(c - S.D) < Math.abs(best.c - S.D));
+    if(closer) best = {c, w, hits};
+  }));
+  if(!best) return;
+  const ok = best.w >= 2 || (known && Math.abs(best.c - S.D) <= 10 * SEC);
+  if(!ok) return;
+  const D = median(best.hits);
+  const was = S.D;
+  S.D = D;
+  S.dTaps = best.hits.slice(-8);
+  if(Math.abs(D - was) > 1500 || !known) S.log.push({k: 'synced', at: now, d: D, n: best.hits.length});
 }
 
 /* Everything new in a feed snapshot. */
@@ -429,14 +507,21 @@ export function feed(S, N, now){
     S.done[P.id] = 1; delete S.queued[P.id];
     S.last = Math.max(S.last, tvTime(S, P));
     if(P.kind === 'kickoff' && !P.badWall){
-      if(S.kick.open || S.kick.taps.length) S.kick.pending = {wall: P.wall, until: P.wall + 120 * SEC};
       if(S.afterScore){ breakWhy = 'score'; S.afterScore = false; }
     }
+    // a new drive's first snap: the guesses for "the next drive" are now its
+    if((P.kind === 'run' || P.kind === 'pass' || P.kind === 'special') && !P.badWall && (!S.cur || S.cur.id !== P.drive)
+      && !S.dvs.some(d => d.id === P.drive) && S.phase !== 'final') startDrive(S, P, now);
+    // where things stand after this play, for the screens
+    if(P.kind !== 'timeout' && P.kind !== 'void' || !S.sit) S.sit = {
+      period: P.period, clock: P.clock, at: tvTime(S, P),
+      team: P.nx ? P.nx.team : P.to, text: P.scoring ? 'Kickoff next' : P.nx ? P.nx.text : '',
+      after: P.kind === 'kickoff' ? 'Kickoff' : P.kind};
     // a kickoff does not use up anybody's call: calls made during the
     // commercial are for the first snap after it
     if(P.kind === 'run' || P.kind === 'pass' || P.kind === 'special' || P.kind === 'kickoff'){
       if(P.kind !== 'kickoff' && !P.badWall) settleCall(S, P, now);
-      S.lastPlay = {line: playLine(S, P), kind: P.kind, at: now, team: P.off};
+      S.lastPlay = {line: playLine(S, P), kind: P.kind, at: now, team: P.off, sit: P.sit, q: P.period, clock: P.clock};
       // play is back on while a round runs: finish the question and stop
       if(S.tv && S.tv.state !== 'done' && P.kind !== 'kickoff' && tvTime(S, P) > S.tv.at) S.tv.ending = true;
     }
@@ -448,7 +533,7 @@ export function feed(S, N, now){
       S.log.push({k: 'score', at: now, team: side, ours: side === S.team, td: pointsUp >= 6 || P.td, line: playLine(S, P),
         h: P.home, a: P.away});
       S.afterScore = true;
-      S.kick.open = true; S.kick.why = 'score';
+      openKick(S, 'score', now);
     }
     if(P.scoring || P.home || P.away){ S.scoreH = Math.max(S.scoreH || 0, P.home); S.scoreA = Math.max(S.scoreA || 0, P.away); }
     if(P.kind === 'timeout' && !/official/i.test(P.type) && !breakWhy) breakWhy = 'timeout';
@@ -459,12 +544,14 @@ export function feed(S, N, now){
   });
   if(half && S.phase !== 'final'){
     S.phase = 'half';
-    S.kick.open = true; S.kick.why = 'half';
+    openKick(S, 'half', now);
     startRound(S, now, 'half', N, 'half');
   } else if(S.phase === 'half' && fresh.some(p => p.period >= 3 && p.kind !== 'period')) S.phase = 'live';
   if(breakWhy && S.phase === 'live') startRound(S, now, 'break', N, breakWhy);
   if(N.status && N.status.state === 'post' && S.phase !== 'final'){ S.phase = 'final'; }
-  if(S.phase === 'final' && !S.finalAt){ S.finalAt = now; S.log.push({k: 'final', at: now}); if(S.dq && !S.dq.locked) S.dq = null; }
+  if(S.phase === 'final' && !S.finalAt){ S.finalAt = now; S.log.push({k: 'final', at: now}); Object.values(S.players).forEach(p => { p.dp = {}; }); }
+  measure(S, N, now);
+  stepKick(S, N, now);
 
   // reviews the feed has settled
   const reviewed = N.plays.filter(p => p.review && p.review !== 'pending');
@@ -483,19 +570,14 @@ export function feed(S, N, now){
   }
   reviewed.forEach(p => { S.rvKnown[p.id] = 1; });
 
-  for(let i = 0; i < 8; i++){            // several drives can arrive at once
-    const was = S.dqN;
-    if(S.phase === 'final' && !S.dq) break;
-    stepDrive(S, N, now);
-    if(S.dqN === was) break;
-  }
   settleDrives(S, N, now);
+  // the drive going now, as far as the feed has got
+  if(S.cur){ const d = N.drives.find(x => x.id === S.cur.id); if(d) S.cur.live = d.stats; }
   if(S.log.length > 60) S.log.splice(0, S.log.length - 60);
 }
 
 /* The clock moving with nothing new from the feed. */
 export function tick(S, now){
-  stepKick(S, now);
   stepRound(S, now);
   stepReview(S, now);
 }
@@ -545,12 +627,41 @@ function tvView(S, now, p){
 
 function teamName(S, id){ const t = S.teams[id]; return t ? t.name : ''; }
 
-function driveView(S, p){
-  const q = S.dq;
-  if(!q || q.locked) return null;
-  const v = {n: q.n, team: teamName(S, q.team), ours: q.team === S.team, first: !q.after};
-  if(p){ const m = q.votes[p.id]; v.mine = m ? m.v : null; }
-  else { v.tally = {}; DRIVE_OPTS.forEach(o => { v.tally[o] = Object.values(q.votes).filter(x => x.v === o).length; }); }
+/* Where the game stands, as of the newest play the TV has shown that the
+   feed knows about. "Fresh" when that play was on the TV less than 25 s
+   ago - nothing newer can have happened yet; otherwise the feed is
+   catching up and the TV may be a play or two further on. */
+function sitView(S, now){
+  const x = S.sit;
+  if(!x) return null;
+  const t = S.teams[x.team];
+  const text = x.after === 'period' ? 'End of quarter' : x.after === 'half' ? 'Halftime' : x.after === 'final' ? 'Final' : x.text;
+  return {q: x.period, clock: x.clock, team: t ? t.abbr : '', teamName: t ? t.name : '', text, fresh: now - x.at < 25 * SEC,
+    ago: Math.round((now - x.at) / 1000)};
+}
+
+function latestDraft(p){
+  const out = {};
+  if(p && p.dp) FIELDS.forEach(f => { const l = p.dp[f]; if(l && l.length) out[f] = l[l.length - 1].v; });
+  return out;
+}
+function driveView(S, p, now){
+  if(S.phase === 'final') return null;
+  // the next drive is the other team's (the feed's newest play says who has the ball now)
+  const hasBall = S.sit && S.sit.team, nextTeam = hasBall ? Object.keys(S.teams).find(k => k !== hasBall) : null;
+  const v = {next: {team: teamName(S, nextTeam), ours: nextTeam === S.team}};
+  if(p) v.next.mine = latestDraft(p);
+  else {
+    v.next.tally = {};
+    FIELDS.forEach(f => { v.next.tally[f] = {}; });
+    Object.values(S.players).forEach(q => { const d = latestDraft(q); Object.entries(d).forEach(([f, x]) => { v.next.tally[f][x] = (v.next.tally[f][x] || 0) + 1; }); });
+  }
+  const c = S.cur;
+  if(c && !c.result){
+    v.cur = {n: c.n, team: teamName(S, c.team), ours: c.team === S.team, live: c.live || null};
+    if(p) v.cur.mine = c.picks[p.id] || null;
+    else { v.cur.tally = {}; Object.values(c.picks).forEach(m => { if(m.res) v.cur.tally[m.res] = (v.cur.tally[m.res] || 0) + 1; }); v.cur.n = Object.keys(c.picks).length; }
+  }
   return v;
 }
 
@@ -582,13 +693,20 @@ export function phoneView(S, id, now){
   const b = board(S);
   const me = b.find(x => x.id === id);
   const pend = p.picks.filter(c => c.t > S.last - 0).slice(-1)[0];
+  const ds = p.dstat || {};
   return {
     t: 'st', phase: S.phase, kid: p.kid ? 1 : 0, mode: S.mode,
     me: {n: p.name, s: p.score, st: p.streak, best: p.best, rank: me ? me.rank : 0, of: b.length, right: p.right, calls: p.calls},
     pend: pend ? {v: pend.v, big: pend.big, t: pend.t} : null,
-    tickets: p.tickets.slice(-T.ticketsKept).map(t => ({v: t.v, res: t.res, pts: t.pts, line: t.line, at: t.at, big: t.big, bigHit: t.bigHit, few: t.few, drive: t.drive, streak: t.streak})),
-    drive: driveView(S, p), review: reviewView(S, now, p), tv: tvView(S, now, p),
+    // every guess settled, newest last: calls and drives
+    tickets: p.tickets.slice(-30).map(t => t.drive ? {drive: t.drive, res: t.res, pts: t.pts, line: t.line, at: t.at, mine: t.mine, ans: t.ans, got: t.got} :
+      {v: t.v, res: t.res, pts: t.pts, line: t.line, at: t.at, big: t.big, bigHit: t.bigHit, few: t.few, streak: t.streak, sit: t.sit, kind: t.kind}),
+    rec: {calls: [p.right, p.calls], big: [p.bigs, p.bigTried || 0], rv: [p.reviews, p.rvTried || 0], tv: [p.tvRight, p.tvTried || 0],
+      drive: Object.fromEntries(FIELDS.map(f => [f, ds[f] || [0, 0]]))},
+    sit: sitView(S, now),
+    drive: driveView(S, p, now), review: reviewView(S, now, p), tv: tvView(S, now, p),
     kick: S.kick.open ? {why: S.kick.why, tapped: S.kick.taps.some(k => k.id === id && now - k.t < 120 * SEC)} : null,
+    synced: S.dTaps.length > 0, snapTapped: S.sync.taps.some(k => k.id === id && now - k.t < 8 * SEC),
     score: scoreView(S), roc: rocMeter(S),
     top: b.slice(0, 3).map(x => ({n: x.n, s: x.s})),
   };
@@ -599,7 +717,9 @@ export function jumboView(S, now){
     phase: S.phase, mode: S.mode, score: scoreView(S), roc: rocMeter(S), rocN: S.roc.length,
     board: board(S).slice(0, 10), players: Object.keys(S.players).length,
     split: split(S, now), lastCall: S.lastCall || null, lastPlay: S.lastPlay,
-    drive: driveView(S, null), review: reviewView(S, now, null), tv: tvView(S, now, null),
+    sit: sitView(S, now),
+    drive: driveView(S, null, now), review: reviewView(S, now, null), tv: tvView(S, now, null),
+    lastDrive: (S.dvs.filter(d => d.result).pop() || {}).line || '',
     kick: S.kick.open ? {why: S.kick.why, taps: S.kick.taps.length} : null,
     log: S.log.slice(-8), D: S.D, synced: S.dTaps.length,
     team: S.team,
@@ -630,6 +750,8 @@ export function load(json){
   const S = JSON.parse(json);
   if(!S || S.proto !== PROTO) return null;
   if(!S.alias) S.alias = {};
+  if(!S.dvs){ S.dvs = []; S.dvN = 0; S.cur = null; }
+  if(!S.sync) S.sync = {taps: [], used: 0};
   if(S.mode !== 'drives') S.mode = 'plays';
   return S;
 }
